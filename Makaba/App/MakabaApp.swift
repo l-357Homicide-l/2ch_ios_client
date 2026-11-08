@@ -7,13 +7,10 @@
 
 import SwiftUI
 
-// Conform MakabaAPIClient to ObservableObject for SwiftUI environment injection
-extension MakabaAPIClient: ObservableObject {}
-
 @main
 struct MakabaApp: App {
     // MARK: - Shared State Containers
-    @StateObject private var apiClient = MakabaAPIClient()
+    @StateObject private var apiClient = MakabaAPIClient.shared
     @StateObject private var favoritesManager = FavoritesManager()
 
     var body: some Scene {

@@ -34,7 +34,7 @@ final class MultipartStreamingTests: XCTestCase {
     func test_writeToTempFile_withBinaryMediaAttachment() throws {
         var multipart = MultipartFormData(boundary: "BinaryStreamingBoundary456")
         let dummyImageBytes = Data(repeating: 0x42, count: 1024 * 128) // 128 KB
-        multipart.appendFile(fieldName: "image", filename: "test.jpg", mimeType: "image/jpeg", fileData: dummyImageBytes)
+        multipart.appendFile(name: "file[]", filename: "test.jpg", mimeType: "image/jpeg", data: dummyImageBytes)
 
         let tempFileURL = try multipart.writeToTempFile()
         defer {
@@ -46,12 +46,12 @@ final class MultipartStreamingTests: XCTestCase {
         XCTAssertGreaterThan(fileSize, 1024 * 128)
     }
 
-    func test_cacheInvalidation_clearsCatalogAndThread() {
+    func test_cacheInvalidation_clearsCatalogAndThread() async {
         let client = MakabaAPIClient.shared
         // Invalidate does not crash and executes cleanly
-        client.invalidateCatalog(board: "b")
-        client.invalidateThread(board: "b", threadNum: 123456)
-        client.invalidateAllCaches()
+        await client.invalidateCatalogCache(board: "b")
+        await client.invalidateThreadCache(board: "b", threadNum: 123456)
+        await client.clearAllCache()
         XCTAssertTrue(true, "Cache invalidation executed without errors")
     }
 }

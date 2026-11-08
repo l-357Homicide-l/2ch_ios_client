@@ -71,7 +71,41 @@ public final class CatalogViewModel: ObservableObject {
             self.threads = response.threads
             self.isLoading = false
         } catch {
-            self.errorMessage = error.localizedDescription
+            // Fallback: Try index.json (Page 0) for boards without catalog.json
+            do {
+                let pageResponse = try await apiClient.fetchBoardPage(board: board.id, page: 0)
+                let convertedThreads = pageResponse.threads.compactMap { threadContainer -> CatalogThreadItem? in
+                    guard let opPost = threadContainer.posts.first else { return nil }
+                    return CatalogThreadItem(
+                        num: opPost.num,
+                        parent: 0,
+                        board: board.id,
+                        subject: opPost.subject,
+                        comment: opPost.comment,
+                        date: opPost.date,
+                        timestamp: opPost.timestamp,
+                        lasthit: opPost.timestamp,
+                        views: opPost.views ?? 0,
+                        postsCount: threadContainer.posts.count,
+                        filesCount: threadContainer.posts.reduce(0) { $0 + ($1.files?.count ?? 0) },
+                        files: opPost.files ?? []
+                    )
+                }
+                if !convertedThreads.isEmpty {
+                    self.threads = convertedThreads
+                    self.isLoading = false
+                    return
+                }
+            } catch {
+                // Secondary fallback failed
+            }
+
+            let errStr = error.localizedDescription
+            if errStr.contains("404") || errStr.contains("500") || errStr.contains("Server Error") {
+                self.errorMessage = "Доска /\(board.id)/ закрыта администрацией сайта или временно недоступна (код ответа сервера)."
+            } else {
+                self.errorMessage = errStr
+            }
             self.isLoading = false
         }
     }
@@ -218,9 +252,10 @@ public struct CatalogView: View {
             if viewModel.displayMode == .grid {
                 LazyVGrid(
                     columns: [
-                        GridItem(.adaptive(minimum: 160, maximum: 240), spacing: 12)
+                        GridItem(.flexible(), spacing: 10),
+                        GridItem(.flexible(), spacing: 10)
                     ],
-                    spacing: 12
+                    spacing: 10
                 ) {
                     ForEach(viewModel.filteredThreads) { thread in
                         NavigationLink(value: thread) {
@@ -229,7 +264,7 @@ public struct CatalogView: View {
                         .buttonStyle(PlainNavigationButtonStyle())
                     }
                 }
-                .padding(12)
+                .padding(10)
             } else {
                 LazyVStack(spacing: 8) {
                     ForEach(viewModel.filteredThreads) { thread in
@@ -365,15 +400,15 @@ public struct CatalogGridCard: View {
                 .foregroundColor(.primary)
                 .lineLimit(2)
                 .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, minHeight: 34, alignment: .topLeading)
 
             // Excerpt of Comment
-            if !cleanCommentExcerpt.isEmpty {
-                Text(cleanCommentExcerpt)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .lineLimit(3)
-                    .multilineTextAlignment(.leading)
-            }
+            Text(cleanCommentExcerpt.isEmpty ? " " : cleanCommentExcerpt)
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, minHeight: 28, alignment: .topLeading)
 
             Spacer(minLength: 0)
 
@@ -411,6 +446,8 @@ public struct CatalogGridCard: View {
             .padding(.top, 2)
         }
         .padding(10)
+        .frame(height: 245)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(Color(UIColor.secondarySystemGroupedBackground))
@@ -443,15 +480,24 @@ public struct CatalogGridCard: View {
                     }
                 }
             } else {
-                Rectangle()
-                    .fill(Color.secondary.opacity(0.1))
-                    .overlay(
-                        Image(systemName: "text.bubble")
-                            .foregroundColor(.secondary)
+                ZStack {
+                    LinearGradient(
+                        colors: [Color.orange.opacity(0.18), Color.orange.opacity(0.06)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
                     )
+                    VStack(spacing: 4) {
+                        Image(systemName: "text.bubble.fill")
+                            .font(.system(size: 22))
+                            .foregroundColor(.orange.opacity(0.85))
+                        Text("Текстовый тред")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(.secondary)
+                    }
+                }
             }
         }
-        .frame(height: 120)
+        .frame(height: 110)
         .clipped()
         .cornerRadius(8)
     }

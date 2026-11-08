@@ -318,6 +318,9 @@ public struct PostingSheet: View {
                         // Comment Editor & Formatting Helpers
                         commentEditorSection
 
+                        // Embedded Emoji Captcha Section (Positioned right under comment so user sees and solves it immediately)
+                        captchaSection
+
                         // Media Attachments Section
                         attachmentsSection
 
@@ -328,9 +331,6 @@ public struct PostingSheet: View {
                         if viewModel.showAdvancedOptions {
                             advancedFieldsSection
                         }
-
-                        // Embedded Emoji Captcha Section
-                        captchaSection
 
                         // Error message banner
                         if let error = viewModel.errorMessage {
@@ -371,7 +371,8 @@ public struct PostingSheet: View {
                         triggerSubmit()
                     }
                     .fontWeight(.semibold)
-                    .disabled(!viewModel.isFormValid || viewModel.isSubmitting)
+                    .disabled(viewModel.isSubmitting)
+                    .opacity(viewModel.isFormValid ? 1.0 : 0.6)
                 }
             }
             .fileImporter(
@@ -383,6 +384,11 @@ public struct PostingSheet: View {
             }
             .onChange(of: selectedPhotosItems) { newItems in
                 handlePhotosSelection(newItems)
+            }
+            .task {
+                if viewModel.captchaViewModel.state == .idle {
+                    viewModel.captchaViewModel.startVerification()
+                }
             }
         }
         .presentationDetents([.large])
@@ -790,11 +796,11 @@ public struct PostingSheet: View {
             .frame(maxWidth: .infinity)
             .padding(.vertical, 14)
             .foregroundColor(.white)
-            .background(viewModel.isFormValid ? Color.orange : Color.secondary.opacity(0.4))
+            .background(viewModel.isFormValid ? Color.orange : Color.orange.opacity(0.65))
             .cornerRadius(12)
             .shadow(color: viewModel.isFormValid ? Color.orange.opacity(0.3) : Color.clear, radius: 8, x: 0, y: 4)
         }
-        .disabled(!viewModel.isFormValid || viewModel.isSubmitting)
+        .disabled(viewModel.isSubmitting)
     }
 
     // MARK: - Submitting Progress Overlay
@@ -864,6 +870,13 @@ public struct PostingSheet: View {
     // MARK: - Actions & Media Import Handlers
 
     private func triggerSubmit() {
+        if !viewModel.isFormValid {
+            let errorFeedback = UINotificationFeedbackGenerator()
+            errorFeedback.notificationOccurred(.warning)
+            viewModel.errorMessage = viewModel.validationErrorMessage
+            return
+        }
+
         let feedback = UIImpactFeedbackGenerator(style: .medium)
         feedback.impactOccurred()
 

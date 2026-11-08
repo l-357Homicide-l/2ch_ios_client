@@ -121,8 +121,8 @@ public enum MakabaEndpoint: Sendable {
         var req = URLRequest(url: requestURL, timeoutInterval: timeoutInterval)
         req.httpMethod = httpMethod
 
-        // Custom iOS User-Agent required by Makaba security filters
-        req.setValue("2ch-Browser/1.0 (iOS; CPU iPhone OS 17_5 like Mac OS X)", forHTTPHeaderField: "User-Agent")
+        // Standard Mobile Safari User-Agent to pass Cloudflare / DDoS-Guard transparently
+        req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1", forHTTPHeaderField: "User-Agent")
         req.setValue("application/json, text/plain, */*", forHTTPHeaderField: "Accept")
 
         if let token = passcodeToken, !token.isEmpty {

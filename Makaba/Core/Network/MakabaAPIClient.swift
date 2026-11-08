@@ -119,6 +119,19 @@ public final class MakabaAPIClient: Sendable {
         }
     }
 
+    /// Fetches a specific board page (index.json for page 0, 1.json, etc.).
+    public func fetchBoardPage(board: String, page: Int = 0) async throws -> ThreadResponse {
+        let req = MakabaEndpoint.boardPage(board: board, page: page).request(baseURL: baseURL, passcodeToken: passcodeToken)
+        let (data, response) = try await execute(request: req)
+        try validateHTTPStatus(response, data: data)
+
+        do {
+            return try JSONDecoder().decode(ThreadResponse.self, from: data)
+        } catch {
+            throw MakabaAPIError.decodingError(error.localizedDescription)
+        }
+    }
+
     /// Fetches all posts in a thread given the board ID and thread root number.
     public func fetchThread(board: String, threadNum: Int) async throws -> ThreadResponse {
         let req = MakabaEndpoint.thread(board: board, threadNum: threadNum).request(baseURL: baseURL, passcodeToken: passcodeToken)

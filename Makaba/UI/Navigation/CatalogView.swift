@@ -71,9 +71,8 @@ public final class CatalogViewModel: ObservableObject {
             self.threads = response.threads
             self.isLoading = false
         } catch {
-            // Fallback: Try index.json (Page 0) for boards without catalog.json
-            do {
-                let pageResponse = try await apiClient.fetchBoardPage(board: board.id, page: 0)
+            // Secondary fallback 1: index.json (Page 0) for boards without catalog.json
+            if let pageResponse = try? await apiClient.fetchBoardPage(board: board.id, page: 0) {
                 let convertedThreads = pageResponse.threads.compactMap { threadContainer -> CatalogThreadItem? in
                     guard let opPost = threadContainer.posts.first else { return nil }
                     return CatalogThreadItem(
@@ -96,8 +95,29 @@ public final class CatalogViewModel: ObservableObject {
                     self.isLoading = false
                     return
                 }
-            } catch {
-                // Secondary fallback failed
+            }
+
+            // Secondary fallback 2: threads.json (flat listing)
+            if let listResponse = try? await apiClient.fetchThreadList(board: board.id), !listResponse.threads.isEmpty {
+                let convertedThreads = listResponse.threads.map { item in
+                    CatalogThreadItem(
+                        num: item.num,
+                        parent: 0,
+                        board: board.id,
+                        subject: item.subject,
+                        comment: item.comment,
+                        date: "",
+                        timestamp: item.timestamp,
+                        lasthit: item.lasthit,
+                        views: item.views ?? 0,
+                        postsCount: item.postsCount,
+                        filesCount: item.filesCount ?? 0,
+                        files: []
+                    )
+                }
+                self.threads = convertedThreads
+                self.isLoading = false
+                return
             }
 
             let errStr = error.localizedDescription

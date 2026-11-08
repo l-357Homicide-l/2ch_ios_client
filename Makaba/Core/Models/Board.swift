@@ -223,6 +223,15 @@ public struct Board: Codable, Identifiable, Hashable, Sendable {
         }
         return defaultValue
     }
+    /// Known boards permanently removed or returning HTTP 500 on 2ch.org.
+    public static let defunctBoardIDs: Set<String> = [
+        "fur", "vn", "ho", "h", "r34", "hg", "by", "e", "ruvn", "fet", "kz", "nf"
+    ]
+
+    /// Whether this board is permanently defunct on 2ch.org.
+    public var isDefunct: Bool {
+        Self.defunctBoardIDs.contains(id.lowercased())
+    }
 }
 
 /// Represents a taxonomic grouping of boards by category name.
@@ -236,9 +245,10 @@ public struct BoardCategory: Identifiable, Hashable, Sendable {
         self.boards = boards
     }
 
-    /// Organizes a flat list of boards into sorted categorical groups.
+    /// Organizes a flat list of boards into sorted categorical groups, isolating defunct boards.
     public static func groupByCategory(_ boards: [Board]) -> [BoardCategory] {
-        let grouped = Dictionary(grouping: boards, by: { $0.category })
+        let activeBoards = boards.filter { !$0.isDefunct }
+        let grouped = Dictionary(grouping: activeBoards, by: { $0.category })
         // Maintain consistent category ordering
         let standardOrder = [
             "Разное",
@@ -266,6 +276,12 @@ public struct BoardCategory: Identifiable, Hashable, Sendable {
         for (name, list) in grouped where !processed.contains(name) {
             let sortedList = list.sorted { $0.id < $1.id }
             categories.append(BoardCategory(name: name, boards: sortedList))
+        }
+
+        // Add defunct / archived boards under a dedicated section at the bottom
+        let defunctBoards = boards.filter { $0.isDefunct }.sorted { $0.id < $1.id }
+        if !defunctBoards.isEmpty {
+            categories.append(BoardCategory(name: "Архивные / закрытые на 2ch", boards: defunctBoards))
         }
 
         return categories

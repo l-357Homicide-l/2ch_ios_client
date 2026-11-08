@@ -66,6 +66,12 @@ public final class CatalogViewModel: ObservableObject {
         isLoading = true
         errorMessage = nil
 
+        if board.isDefunct {
+            self.errorMessage = "Доска /\(board.id)/ закрыта администрацией сайта и удалена с серверов двача."
+            self.isLoading = false
+            return
+        }
+
         do {
             let response = try await apiClient.fetchCatalog(board: board.id)
             self.threads = response.threads
@@ -272,8 +278,8 @@ public struct CatalogView: View {
             if viewModel.displayMode == .grid {
                 LazyVGrid(
                     columns: [
-                        GridItem(.flexible(), spacing: 10),
-                        GridItem(.flexible(), spacing: 10)
+                        GridItem(.flexible(minimum: 0, maximum: .infinity), spacing: 10),
+                        GridItem(.flexible(minimum: 0, maximum: .infinity), spacing: 10)
                     ],
                     spacing: 10
                 ) {
@@ -419,6 +425,7 @@ public struct CatalogGridCard: View {
                 .font(.system(.subheadline, design: .default).weight(.semibold))
                 .foregroundColor(.primary)
                 .lineLimit(2)
+                .truncationMode(.tail)
                 .multilineTextAlignment(.leading)
                 .frame(maxWidth: .infinity, minHeight: 34, alignment: .topLeading)
 
@@ -427,6 +434,7 @@ public struct CatalogGridCard: View {
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .lineLimit(2)
+                .truncationMode(.tail)
                 .multilineTextAlignment(.leading)
                 .frame(maxWidth: .infinity, minHeight: 28, alignment: .topLeading)
 
@@ -468,6 +476,7 @@ public struct CatalogGridCard: View {
         .padding(10)
         .frame(height: 245)
         .frame(maxWidth: .infinity, alignment: .topLeading)
+        .clipped()
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(Color(UIColor.secondarySystemGroupedBackground))
@@ -485,9 +494,13 @@ public struct CatalogGridCard: View {
                             .fill(Color.secondary.opacity(0.15))
                             .overlay(ProgressView().scaleEffect(0.8))
                     case .success(let image):
-                        image
-                            .resizable()
-                            .scaledToFill()
+                        Color.clear
+                            .overlay(
+                                image
+                                    .resizable()
+                                    .scaledToFill()
+                            )
+                            .clipped()
                     case .failure:
                         Rectangle()
                             .fill(Color.secondary.opacity(0.15))
@@ -518,8 +531,25 @@ public struct CatalogGridCard: View {
             }
         }
         .frame(height: 110)
+        .frame(maxWidth: .infinity)
         .clipped()
         .cornerRadius(8)
+        .overlay(alignment: .bottomLeading) {
+            if thread.filesCount > 1 {
+                HStack(spacing: 3) {
+                    Image(systemName: "square.fill.on.square.fill")
+                        .font(.system(size: 9))
+                    Text("\(thread.filesCount)")
+                        .font(.system(size: 10, weight: .bold))
+                }
+                .foregroundColor(.white)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(Color.black.opacity(0.65))
+                .clipShape(Capsule())
+                .padding(6)
+            }
+        }
     }
 
     private var cleanCommentExcerpt: String {

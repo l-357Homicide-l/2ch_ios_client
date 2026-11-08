@@ -272,9 +272,21 @@ public struct BoardRowView: View {
 
             // Board Name and Metadata
             VStack(alignment: .leading, spacing: 3) {
-                Text(board.name)
-                    .font(.body.weight(.medium))
-                    .foregroundColor(.primary)
+                HStack(spacing: 6) {
+                    Text(board.name)
+                        .font(.body.weight(.medium))
+                        .foregroundColor(board.isDefunct ? .secondary : .primary)
+
+                    if board.isDefunct {
+                        Text("Архив")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundColor(.red)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(Color.red.opacity(0.12))
+                            .clipShape(Capsule())
+                    }
+                }
 
                 if !board.info.isEmpty {
                     Text(cleanInfoText(board.info))

@@ -114,6 +114,10 @@ public struct BoardListView: View {
     @ObservedObject private var domainConfig = DomainConfigurationService.shared
 
     @StateObject private var viewModel: BoardListViewModel
+    @State private var showingCustomMirrorAlert = false
+    @State private var customMirrorInput = ""
+    @State private var showingPasscodeAlert = false
+    @State private var passcodeInput = ""
 
     /// Optional binding for split-view selection.
     @Binding public var selectedBoard: Board?
@@ -145,8 +149,46 @@ public struct BoardListView: View {
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Menu {
-                    Section("Зеркала 2ch") {
-                        ForEach(DomainConfigurationService.availableMirrors, id: \.self) { mirror in
+                    Section("Проверенные зеркала") {
+                        ForEach(DomainConfigurationService.verifiedMirrors, id: \.self) { mirror in
+                            Button {
+                                domainConfig.setDomain(mirror)
+                                Task {
+                                    await viewModel.loadBoards()
+                                }
+                            } label: {
+                                HStack {
+                                    Text(mirror.replacingOccurrences(of: "https://", with: ""))
+                                    if domainConfig.currentDomain == mirror {
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if !domainConfig.customMirrors.isEmpty {
+                        Section("Пользовательские зеркала") {
+                            ForEach(domainConfig.customMirrors, id: \.self) { mirror in
+                                Button {
+                                    domainConfig.setDomain(mirror)
+                                    Task {
+                                        await viewModel.loadBoards()
+                                    }
+                                } label: {
+                                    HStack {
+                                        Text(mirror.replacingOccurrences(of: "https://", with: ""))
+                                        if domainConfig.currentDomain == mirror {
+                                            Image(systemName: "checkmark")
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Section("Резервные (unverified)") {
+                        ForEach(DomainConfigurationService.fallbackMirrors, id: \.self) { mirror in
                             Button {
                                 domainConfig.setDomain(mirror)
                                 Task {
@@ -172,6 +214,23 @@ public struct BoardListView: View {
                         } label: {
                             Label("Выбрать быстрейшее зеркало", systemImage: "bolt.fill")
                         }
+
+                        Button {
+                            customMirrorInput = ""
+                            showingCustomMirrorAlert = true
+                        } label: {
+                            Label("Добавить своё зеркало...", systemImage: "plus.circle")
+                        }
+
+                        Button {
+                            passcodeInput = domainConfig.passcodeToken ?? ""
+                            showingPasscodeAlert = true
+                        } label: {
+                            Label(
+                                domainConfig.passcodeToken == nil ? "Ввести пасскод 2ch..." : "Пасскод активен (изменить)",
+                                systemImage: domainConfig.passcodeToken == nil ? "key" : "key.fill"
+                            )
+                        }
                     }
                 } label: {
                     HStack(spacing: 4) {
@@ -185,6 +244,39 @@ public struct BoardListView: View {
                     .cornerRadius(8)
                 }
             }
+        }
+        .alert("Добавить своё зеркало", isPresented: $showingCustomMirrorAlert) {
+            TextField("https://...", text: $customMirrorInput)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled(true)
+            Button("Добавить") {
+                let res = domainConfig.addCustomMirror(customMirrorInput)
+                if res.success {
+                    domainConfig.setDomain(customMirrorInput)
+                    Task {
+                        await viewModel.loadBoards()
+                    }
+                }
+            }
+            Button("Отмена", role: .cancel) {}
+        } message: {
+            Text("Введите полный URL нового зеркала или прокси (например, https://2ch.hk).")
+        }
+        .alert("Пасскод 2ch", isPresented: $showingPasscodeAlert) {
+            TextField("Хеш или код пасскода", text: $passcodeInput)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled(true)
+            Button("Сохранить") {
+                domainConfig.setPasscode(passcodeInput.isEmpty ? nil : passcodeInput)
+            }
+            if domainConfig.passcodeToken != nil {
+                Button("Удалить пасскод", role: .destructive) {
+                    domainConfig.setPasscode(nil)
+                }
+            }
+            Button("Отмена", role: .cancel) {}
+        } message: {
+            Text("Пасскод отключает капчу и лимиты на постинг во всех тредах.")
         }
         .refreshable {
             await viewModel.loadBoards()

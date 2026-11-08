@@ -2,8 +2,9 @@
 //  DomainConfigurationService.swift
 //  Makaba
 //
-//  Dynamic mirror configuration and automated failover service.
-//  Provides seamless failover across 2ch.hk, 2ch.org, 2ch.pm, 2ch.re, and 2ch.life.
+//  Dynamic mirror configuration, content-validating health checks, and automated failover service.
+//  Provides seamless failover across verified mirrors (2ch.org, 2ch.hk), user custom mirrors,
+//  and unverified fallbacks (2ch.pm, 2ch.life), with strict JSON payload validation.
 //
 
 import Foundation
@@ -11,6 +12,7 @@ import Combine
 
 extension Notification.Name {
     public static let makabaDomainDidChange = Notification.Name("MakabaDomainDidChangeNotification")
+    public static let makabaPasscodeDidChange = Notification.Name("MakabaPasscodeDidChangeNotification")
 }
 
 public final class DomainConfigurationService: ObservableObject, @unchecked Sendable {
@@ -19,26 +21,71 @@ public final class DomainConfigurationService: ObservableObject, @unchecked Send
     /// Default production fallback domain.
     public static let defaultDomain: String = "https://2ch.org"
 
-    /// Supported official and community mirror endpoints ordered by preference.
-    public static let availableMirrors: [String] = [
+    /// Verified production mirrors serving full Makaba JSON API.
+    public static let verifiedMirrors: [String] = [
         "https://2ch.org",
-        "https://2ch.hk",
+        "https://2ch.hk"
+    ]
+
+    /// Unverified/experimental fallbacks (e.g. Cloudflare captcha or HTML blocks).
+    /// Kept out of automated failover until explicitly activated or verified.
+    public static let fallbackMirrors: [String] = [
         "https://2ch.pm",
-        "https://2ch.re",
         "https://2ch.life"
     ]
 
+    /// All pre-configured and custom mirrors.
+    public static var availableMirrors: [String] {
+        return shared.allMirrors
+    }
+
     private let userDefaultsKey = "selected_domain"
+    private let customMirrorsKey = "custom_mirrors"
+    private let passcodeKey = "makaba_passcode_token"
     private let lock = NSLock()
     private var _domain: String
+    private var _customMirrors: [String]
+    private var _passcodeToken: String?
 
     @Published public private(set) var activeDomain: String
+    @Published public private(set) var customMirrors: [String]
+    @Published public private(set) var passcodeToken: String?
 
     private init() {
-        let stored = UserDefaults.standard.string(forKey: userDefaultsKey)
-        let initial = (stored != nil && Self.availableMirrors.contains(stored!)) ? stored! : Self.defaultDomain
+        let storedDomain = UserDefaults.standard.string(forKey: userDefaultsKey)
+        let storedCustom = UserDefaults.standard.stringArray(forKey: customMirrorsKey) ?? []
+        let storedPasscode = UserDefaults.standard.string(forKey: passcodeKey)
+
+        self._customMirrors = storedCustom
+        self.customMirrors = storedCustom
+        self._passcodeToken = storedPasscode
+        self.passcodeToken = storedPasscode
+
+        let allValid = Self.verifiedMirrors + storedCustom + Self.fallbackMirrors
+        let initial = (storedDomain != nil && allValid.contains(storedDomain!)) ? storedDomain! : Self.defaultDomain
         self._domain = initial
         self.activeDomain = initial
+    }
+
+    /// Combined list of all verified, user custom, and fallback mirrors.
+    public var allMirrors: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        var list = Self.verifiedMirrors + _customMirrors
+        for fallback in Self.fallbackMirrors {
+            if !list.contains(fallback) {
+                list.append(fallback)
+            }
+        }
+        return list
+    }
+
+    /// Mirrors eligible for automated failover and fastest-mirror selection.
+    /// Excludes unverified fallbacks to prevent Cloudflare HTML challenge loops.
+    public var autoFailoverMirrors: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return Self.verifiedMirrors + _customMirrors
     }
 
     /// The base URL currently selected for network operations.
@@ -82,14 +129,81 @@ public final class DomainConfigurationService: ObservableObject, @unchecked Send
         }
     }
 
-    /// Cycles automatically to the next configured mirror upon connection failure or DNS block.
+    /// Adds a user-defined custom mirror (e.g. personal proxy or new 2ch mirror).
+    @discardableResult
+    public func addCustomMirror(_ rawDomain: String) -> (success: Bool, message: String) {
+        let clean = rawDomain.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else {
+            return (false, "Домен не может быть пустым.")
+        }
+        let normalized = clean.hasPrefix("http") ? clean : "https://\(clean)"
+        guard let url = URL(string: normalized), url.host != nil else {
+            return (false, "Некорректный URL зеркала.")
+        }
+
+        lock.lock()
+        if !_customMirrors.contains(normalized) && !Self.verifiedMirrors.contains(normalized) && !Self.fallbackMirrors.contains(normalized) {
+            _customMirrors.append(normalized)
+            UserDefaults.standard.set(_customMirrors, forKey: customMirrorsKey)
+        }
+        let updated = _customMirrors
+        lock.unlock()
+
+        DispatchQueue.main.async { [weak self] in
+            self?.customMirrors = updated
+        }
+        return (true, "Зеркало добавлено.")
+    }
+
+    /// Removes a custom mirror.
+    public func removeCustomMirror(_ mirror: String) {
+        lock.lock()
+        _customMirrors.removeAll { $0 == mirror }
+        UserDefaults.standard.set(_customMirrors, forKey: customMirrorsKey)
+        let updated = _customMirrors
+        let isCurrent = (_domain == mirror)
+        lock.unlock()
+
+        if isCurrent {
+            setDomain(Self.defaultDomain)
+        }
+        DispatchQueue.main.async { [weak self] in
+            self?.customMirrors = updated
+        }
+    }
+
+    /// Updates or clears the 2ch passcode token.
+    public func setPasscode(_ token: String?) {
+        let clean = token?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let finalToken = (clean?.isEmpty ?? true) ? nil : clean
+
+        lock.lock()
+        _passcodeToken = finalToken
+        if let t = finalToken {
+            UserDefaults.standard.set(t, forKey: passcodeKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: passcodeKey)
+        }
+        lock.unlock()
+
+        DispatchQueue.main.async { [weak self] in
+            self?.passcodeToken = finalToken
+            NotificationCenter.default.post(
+                name: .makabaPasscodeDidChange,
+                object: finalToken
+            )
+        }
+    }
+
+    /// Cycles automatically to the next configured verified mirror upon connection failure or DNS block.
     @discardableResult
     public func failoverToNextMirror() -> String {
         lock.lock()
+        let pool = autoFailoverMirrors.isEmpty ? allMirrors : autoFailoverMirrors
         let current = _domain
-        let currentIndex = Self.availableMirrors.firstIndex(of: current) ?? 0
-        let nextIndex = (currentIndex + 1) % Self.availableMirrors.count
-        let nextMirror = Self.availableMirrors[nextIndex]
+        let currentIndex = pool.firstIndex(of: current) ?? 0
+        let nextIndex = (currentIndex + 1) % pool.count
+        let nextMirror = pool[nextIndex]
         _domain = nextMirror
         UserDefaults.standard.set(nextMirror, forKey: userDefaultsKey)
         lock.unlock()
@@ -128,29 +242,44 @@ public final class DomainConfigurationService: ObservableObject, @unchecked Send
         return components.url
     }
 
-    /// Measures connection latency to a given mirror in seconds. Returns nil on timeout or error.
-    public func ping(mirror: String, timeout: TimeInterval = 3.0) async -> TimeInterval? {
-        guard let url = URL(string: "\(mirror)/api/mobile/v2/boards") else { return nil }
+    /// Rigorous content-validating health-check.
+    /// Probes the lightweight 461-byte captcha ID endpoint and validates HTTP 200, Content-Type: application/json,
+    /// and successful JSON deserialization. Returns latency in seconds, or nil if Cloudflare block/HTML/error.
+    public func ping(mirror: String, timeout: TimeInterval = 4.0) async -> TimeInterval? {
+        guard let url = URL(string: "\(mirror)/api/captcha/emoji/id?board=b&thread=0") else { return nil }
         var request = URLRequest(url: url)
-        request.httpMethod = "HEAD"
+        request.httpMethod = "GET"
         request.timeoutInterval = timeout
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1", forHTTPHeaderField: "User-Agent")
 
         let start = CFAbsoluteTimeGetCurrent()
         do {
-            let (_, response) = try await URLSession.shared.data(for: request)
-            if let http = response as? HTTPURLResponse, (200...399).contains(http.statusCode) {
-                return CFAbsoluteTimeGetCurrent() - start
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+                return nil
             }
-            return nil
+            // Strict Content-Type validation: reject HTML challenges or parking pages
+            guard let contentType = http.value(forHTTPHeaderField: "Content-Type")?.lowercased(),
+                  contentType.contains("application/json") else {
+                return nil
+            }
+            // Valid JSON dictionary validation: must deserialize into valid Makaba response
+            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  !json.isEmpty else {
+                return nil
+            }
+            return CFAbsoluteTimeGetCurrent() - start
         } catch {
             return nil
         }
     }
 
-    /// Pings all configured mirrors concurrently and returns latency benchmarks.
+    /// Probes all verified and custom mirrors concurrently and returns latency benchmarks.
     public func testAllMirrors() async -> [String: TimeInterval?] {
-        await withTaskGroup(of: (String, TimeInterval?).self) { group in
-            for mirror in Self.availableMirrors {
+        let targets = autoFailoverMirrors
+        return await withTaskGroup(of: (String, TimeInterval?).self) { group in
+            for mirror in targets {
                 group.addTask {
                     let latency = await self.ping(mirror: mirror)
                     return (mirror, latency)
@@ -164,7 +293,7 @@ public final class DomainConfigurationService: ObservableObject, @unchecked Send
         }
     }
 
-    /// Automatically selects and sets the mirror with the lowest measured latency.
+    /// Automatically selects and sets the mirror with the lowest measured latency that passed JSON content validation.
     @discardableResult
     public func autoSelectFastestMirror() async -> String {
         let results = await testAllMirrors()

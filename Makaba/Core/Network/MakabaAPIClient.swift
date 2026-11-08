@@ -109,7 +109,11 @@ public final class MakabaAPIClient: ObservableObject, Sendable {
     }
 
     public let session: URLSession
-    public let passcodeToken: String?
+    private let _customPasscodeToken: String?
+
+    public var passcodeToken: String? {
+        return _customPasscodeToken ?? DomainConfigurationService.shared.passcodeToken
+    }
 
     public init(
         baseURL: URL? = nil,
@@ -117,6 +121,7 @@ public final class MakabaAPIClient: ObservableObject, Sendable {
         passcodeToken: String? = nil
     ) {
         self.customBaseURL = baseURL
+        self._customPasscodeToken = passcodeToken
         if let customSession = session {
             self.session = customSession
         } else {
@@ -129,7 +134,6 @@ public final class MakabaAPIClient: ObservableObject, Sendable {
             config.requestCachePolicy = .useProtocolCachePolicy
             self.session = URLSession(configuration: config)
         }
-        self.passcodeToken = passcodeToken
     }
 
     // MARK: - Public Read Endpoints

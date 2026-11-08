@@ -129,7 +129,7 @@ public enum MakabaEndpoint: Sendable {
         req.setValue("application/json, text/plain, */*", forHTTPHeaderField: "Accept")
 
         if let token = passcodeToken, !token.isEmpty {
-            req.setValue("passcode_auth=\(token)", forHTTPHeaderField: "Cookie")
+            req.setValue("usercode=\(token); passcode_auth=\(token)", forHTTPHeaderField: "Cookie")
         }
 
         return req

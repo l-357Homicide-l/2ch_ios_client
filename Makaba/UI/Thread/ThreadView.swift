@@ -37,7 +37,7 @@ public final class ThreadViewModel: ObservableObject {
         self.apiClient = apiClient
     }
 
-    /// Fetches all posts in the thread and calculates the reply graph.
+    /// Fetches all posts in the thread and calculates the reply graph with smooth incremental diffing.
     public func loadThread(forceRefresh: Bool = false) async {
         if posts.isEmpty {
             isLoading = true
@@ -49,9 +49,22 @@ public final class ThreadViewModel: ObservableObject {
         do {
             let response = try await apiClient.fetchThread(board: boardId, threadNum: threadNum, ignoreCache: forceRefresh)
             self.threadResponse = response
-            self.posts = response.posts
-            self.buildReplyGraph()
-            self.buildMediaList()
+
+            // Incremental Diffing: Only append new posts to avoid re-rendering existing items and scroll hitches
+            if self.posts.isEmpty {
+                self.posts = response.posts
+                self.buildReplyGraph()
+                self.buildMediaList()
+            } else if response.posts.count > self.posts.count {
+                let existingIds = Set(self.posts.map { $0.num })
+                let newPosts = response.posts.filter { !existingIds.contains($0.num) }
+                if !newPosts.isEmpty {
+                    self.posts.append(contentsOf: newPosts)
+                    self.buildIncrementalReplyGraph(newPosts: newPosts)
+                    self.buildIncrementalMediaList(newPosts: newPosts)
+                }
+            }
+
             self.isLoading = false
             self.isRefreshing = false
         } catch {
@@ -79,6 +92,20 @@ public final class ThreadViewModel: ObservableObject {
         self.repliesToMap = map
     }
 
+    /// Incremental reply graph update for appended posts only.
+    private func buildIncrementalReplyGraph(newPosts: [Post]) {
+        for post in newPosts {
+            let referencedNumbers = post.referencedPostNumbers
+            for targetNum in referencedNumbers {
+                if repliesToMap[targetNum] == nil {
+                    repliesToMap[targetNum] = [post.num]
+                } else if !(repliesToMap[targetNum]?.contains(post.num) ?? false) {
+                    repliesToMap[targetNum]?.append(post.num)
+                }
+            }
+        }
+    }
+
     /// Flattens all media files across all posts for the fullscreen gallery.
     private func buildMediaList() {
         var files: [MediaFile] = []
@@ -86,6 +113,13 @@ public final class ThreadViewModel: ObservableObject {
             files.append(contentsOf: post.files)
         }
         self.allMediaFiles = files
+    }
+
+    /// Incremental media list append for new posts only.
+    private func buildIncrementalMediaList(newPosts: [Post]) {
+        for post in newPosts {
+            allMediaFiles.append(contentsOf: post.files)
+        }
     }
 
     public var opPost: Post? {

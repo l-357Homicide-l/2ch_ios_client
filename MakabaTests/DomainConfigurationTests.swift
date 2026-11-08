@@ -3,7 +3,8 @@
 //  MakabaTests
 //
 //  Automated unit test suite validating multi-mirror configuration, dynamic base URL routing,
-//  failover cycling across 2ch.hk / 2ch.org / 2ch.pm / 2ch.re / 2ch.life, and URL rewriting.
+//  failover cycling across verified mirrors (2ch.org, 2ch.hk), custom mirror management,
+//  passcode persistence, and URL rewriting.
 //
 
 import XCTest
@@ -13,29 +14,42 @@ final class DomainConfigurationTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        // Reset to default domain before each test
+        // Reset to default domain and clear custom mirrors before each test
         DomainConfigurationService.shared.setDomain(DomainConfigurationService.defaultDomain)
+        for custom in DomainConfigurationService.shared.customMirrors {
+            DomainConfigurationService.shared.removeCustomMirror(custom)
+        }
+        DomainConfigurationService.shared.setPasscode(nil)
     }
 
     override func tearDown() {
         DomainConfigurationService.shared.setDomain(DomainConfigurationService.defaultDomain)
+        for custom in DomainConfigurationService.shared.customMirrors {
+            DomainConfigurationService.shared.removeCustomMirror(custom)
+        }
+        DomainConfigurationService.shared.setPasscode(nil)
         super.tearDown()
     }
 
     // MARK: - 1. Mirror Registry & Defaults
 
-    func test_availableMirrors_containsAllRequiredDomains() {
+    func test_availableMirrors_containsVerifiedAndFallbackDomains() {
         let mirrors = DomainConfigurationService.availableMirrors
-        XCTAssertTrue(mirrors.contains("https://2ch.hk"), "Must contain primary 2ch.hk")
-        XCTAssertTrue(mirrors.contains("https://2ch.org"), "Must contain mirror 2ch.org")
-        XCTAssertTrue(mirrors.contains("https://2ch.pm"), "Must contain backup mirror 2ch.pm")
-        XCTAssertTrue(mirrors.contains("https://2ch.re"), "Must contain backup mirror 2ch.re")
-        XCTAssertTrue(mirrors.contains("https://2ch.life"), "Must contain community mirror 2ch.life")
-        XCTAssertEqual(mirrors.count, 5)
+        XCTAssertTrue(mirrors.contains("https://2ch.hk"), "Must contain verified 2ch.hk")
+        XCTAssertTrue(mirrors.contains("https://2ch.org"), "Must contain verified 2ch.org")
+        XCTAssertTrue(mirrors.contains("https://2ch.pm"), "Must contain fallback mirror 2ch.pm")
+        XCTAssertTrue(mirrors.contains("https://2ch.life"), "Must contain fallback mirror 2ch.life")
+        XCTAssertFalse(mirrors.contains("https://2ch.re"), "Dead domain 2ch.re (NXDOMAIN) must be purged")
+        XCTAssertEqual(mirrors.count, 4)
     }
 
     func test_defaultDomain_is2chOrg() {
         XCTAssertEqual(DomainConfigurationService.defaultDomain, "https://2ch.org")
+    }
+
+    func test_verifiedMirrors_containsOnlyHealthyJSONDomains() {
+        let verified = DomainConfigurationService.verifiedMirrors
+        XCTAssertEqual(verified, ["https://2ch.org", "https://2ch.hk"])
     }
 
     // MARK: - 2. Domain Switching & Host Resolution
@@ -56,40 +70,62 @@ final class DomainConfigurationTests: XCTestCase {
 
     func test_setDomain_normalizesScheme() {
         let service = DomainConfigurationService.shared
-        service.setDomain("2ch.re")
-        XCTAssertEqual(service.currentDomain, "https://2ch.re")
-        XCTAssertEqual(service.activeHost, "2ch.re")
+        service.setDomain("custom-mirror.net")
+        XCTAssertEqual(service.currentDomain, "https://custom-mirror.net")
+        XCTAssertEqual(service.activeHost, "custom-mirror.net")
     }
 
     // MARK: - 3. Failover Cycling
 
-    func test_failoverToNextMirror_cyclesThroughAllMirrorsAndWrapsAround() {
+    func test_failoverToNextMirror_cyclesThroughVerifiedMirrorsAndWrapsAround() {
         let service = DomainConfigurationService.shared
-        let mirrors = DomainConfigurationService.availableMirrors
+        let pool = service.autoFailoverMirrors
 
-        service.setDomain(mirrors[0]) // https://2ch.org
-        XCTAssertEqual(service.currentDomain, mirrors[0])
+        service.setDomain(pool[0]) // https://2ch.org
+        XCTAssertEqual(service.currentDomain, pool[0])
 
         let next1 = service.failoverToNextMirror()
-        XCTAssertEqual(next1, mirrors[1]) // https://2ch.hk
-        XCTAssertEqual(service.currentDomain, mirrors[1])
+        XCTAssertEqual(next1, pool[1]) // https://2ch.hk
+        XCTAssertEqual(service.currentDomain, pool[1])
 
-        let next2 = service.failoverToNextMirror()
-        XCTAssertEqual(next2, mirrors[2]) // https://2ch.pm
-
-        let next3 = service.failoverToNextMirror()
-        XCTAssertEqual(next3, mirrors[3]) // https://2ch.re
-
-        let next4 = service.failoverToNextMirror()
-        XCTAssertEqual(next4, mirrors[4]) // https://2ch.life
-
-        // Wraps back to first mirror
+        // Wraps back to first verified mirror
         let wrapped = service.failoverToNextMirror()
-        XCTAssertEqual(wrapped, mirrors[0])
-        XCTAssertEqual(service.currentDomain, mirrors[0])
+        XCTAssertEqual(wrapped, pool[0])
+        XCTAssertEqual(service.currentDomain, pool[0])
     }
 
-    // MARK: - 4. URL Resolution & Rewriting
+    // MARK: - 4. Custom Mirror Management
+
+    func test_customMirror_addAndRemove() {
+        let service = DomainConfigurationService.shared
+        let testMirror = "https://custom-proxy.io"
+
+        let addResult = service.addCustomMirror(testMirror)
+        XCTAssertTrue(addResult.success)
+        XCTAssertTrue(service.customMirrors.contains(testMirror))
+        XCTAssertTrue(service.allMirrors.contains(testMirror))
+        XCTAssertTrue(service.autoFailoverMirrors.contains(testMirror))
+
+        service.removeCustomMirror(testMirror)
+        XCTAssertFalse(service.customMirrors.contains(testMirror))
+        XCTAssertFalse(service.autoFailoverMirrors.contains(testMirror))
+    }
+
+    // MARK: - 5. Passcode Persistence
+
+    func test_passcode_saveAndClear() {
+        let service = DomainConfigurationService.shared
+        let token = "usercode_secret_abc123"
+
+        service.setPasscode(token)
+        XCTAssertEqual(service.passcodeToken, token)
+        XCTAssertEqual(MakabaAPIClient.shared.passcodeToken, token)
+
+        service.setPasscode(nil)
+        XCTAssertNil(service.passcodeToken)
+    }
+
+    // MARK: - 6. URL Resolution & Rewriting
 
     func test_buildURL_resolvesRelativePathsCorrectly() {
         let service = DomainConfigurationService.shared
@@ -122,7 +158,7 @@ final class DomainConfigurationTests: XCTestCase {
         XCTAssertEqual(rewritten?.query, "board=b&thread=100")
     }
 
-    // MARK: - 5. Dynamic Integration with Endpoints and API Client
+    // MARK: - 7. Dynamic Integration with Endpoints and API Client
 
     func test_endpoints_dynamicallyFollowsActiveDomain() {
         let service = DomainConfigurationService.shared
@@ -135,9 +171,9 @@ final class DomainConfigurationTests: XCTestCase {
         let urlHk = MakabaEndpoint.boards.url()
         XCTAssertTrue(urlHk.absoluteString.hasPrefix("https://2ch.hk"))
 
-        service.setDomain("https://2ch.re")
-        let urlRe = MakabaEndpoint.catalog(board: "b").url()
-        XCTAssertTrue(urlRe.absoluteString.hasPrefix("https://2ch.re"))
+        service.setDomain("https://2ch.pm")
+        let urlPm = MakabaEndpoint.catalog(board: "b").url()
+        XCTAssertTrue(urlPm.absoluteString.hasPrefix("https://2ch.pm"))
     }
 
     func test_apiClient_dynamicallyFollowsActiveDomain() {

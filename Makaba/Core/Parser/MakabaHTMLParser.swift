@@ -38,8 +38,11 @@ public final class MakabaHTMLParser: Sendable {
     /// Quote link accent color.
     public static let quoteLinkColor = Color.orange
 
+    /// Canonical internal quote scheme conforming strictly to RFC 3986 (begins with an ASCII letter).
+    public static let quoteScheme = "makaba-quote"
+
     /// Whitelisted URL schemes permitted for active clickable links.
-    private static let whitelistedSchemes: Set<String> = ["2ch-quote", "http", "https"]
+    private static let whitelistedSchemes: Set<String> = [quoteScheme, "2ch-quote", "http", "https"]
 
     private static let quoteRegex: NSRegularExpression? = {
         try? NSRegularExpression(pattern: #"(?:data-num=["'](\d+)["']|&gt;&gt;(\d+)|href=["'][^"']*#(\d+)["'])"#)
@@ -326,7 +329,7 @@ public final class MakabaHTMLParser: Sendable {
 
             if let num = quoteNum {
                 nextState.quoteNum = num
-                nextState.linkURL = URL(string: "2ch-quote://\(num)")
+                nextState.linkURL = URL(string: "\(Self.quoteScheme)://\(num)")
             } else if let hrefStr = href, let parsedURL = URL(string: hrefStr) {
                 // Challenger 2 Hardening: Whitelist schemes (http, https, 2ch-quote)
                 // Filter out dangerous schemes like javascript:, data:, file:

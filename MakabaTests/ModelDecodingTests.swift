@@ -376,7 +376,7 @@ final class ModelDecodingTests: XCTestCase {
     // MARK: - 4. Post Model Tests
 
     func test_postDecoding_withAllPropertiesAndComputedLogic() throws {
-        let json = """
+        let json = #"""
         {
             "num": 338026307,
             "number": 5,
@@ -408,7 +408,7 @@ final class ModelDecodingTests: XCTestCase {
                 }
             ]
         }
-        """.data(using: .utf8)!
+        """#.data(using: .utf8)!
 
         let post = try decoder.decode(Post.self, from: json)
 

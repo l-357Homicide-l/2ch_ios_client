@@ -43,12 +43,12 @@ final class HTMLParserTests: XCTestCase {
         var quoteLinkFound = false
         for run in attr.runs {
             if let link = run.link {
-                XCTAssertEqual(link.scheme, "2ch-quote")
+                XCTAssertEqual(link.scheme, MakabaHTMLParser.quoteScheme)
                 XCTAssertEqual(link.host, "338026248")
                 quoteLinkFound = true
             }
         }
-        XCTAssertTrue(quoteLinkFound, "Quote link must be transformed to 2ch-quote://338026248")
+        XCTAssertTrue(quoteLinkFound, "Quote link must be transformed to \(MakabaHTMLParser.quoteScheme)://338026248")
     }
 
     func test_parse_quoteLink_fallbackToAnchorInHref_whenDataNumAbsent() {
@@ -59,11 +59,11 @@ final class HTMLParserTests: XCTestCase {
 
         var quoteLinkFound = false
         for run in attr.runs {
-            if let link = run.link, link.absoluteString == "2ch-quote://67890" {
+            if let link = run.link, link.absoluteString == "\(MakabaHTMLParser.quoteScheme)://67890" {
                 quoteLinkFound = true
             }
         }
-        XCTAssertTrue(quoteLinkFound, "Anchor in href must fallback to 2ch-quote://67890")
+        XCTAssertTrue(quoteLinkFound, "Anchor in href must fallback to \(MakabaHTMLParser.quoteScheme)://67890")
     }
 
     // MARK: - 3. Entity Collision Immunity Tests
@@ -76,9 +76,10 @@ final class HTMLParserTests: XCTestCase {
         let plain = String(attr.characters)
         XCTAssertEqual(plain, "It's a great day & rock 'n' roll!")
 
-        // Ensure no run has a link pointing to 2ch-quote://39
+        // Ensure no run has a link pointing to makaba-quote://39 or 2ch-quote://39
         for run in attr.runs {
             if let link = run.link {
+                XCTAssertNotEqual(link.absoluteString, "\(MakabaHTMLParser.quoteScheme)://39")
                 XCTAssertNotEqual(link.absoluteString, "2ch-quote://39")
             }
         }

@@ -200,9 +200,9 @@ public struct ThreadView: View {
                     await viewModel.loadThread()
                 }
             }
-            // 2ch-quote:// URL Scheme Interception for Quote Popovers
+            // Quote URL Scheme Interception for Quote Popovers
             .environment(\.openURL, OpenURLAction { url in
-                if url.scheme == "2ch-quote" {
+                if url.scheme == "makaba-quote" || url.scheme == "2ch-quote" {
                     let targetStr = url.host ?? url.path.replacingOccurrences(of: "/", with: "")
                     if let targetNum = Int(targetStr) {
                         if let targetPost = viewModel.posts.first(where: { $0.num == targetNum }) {

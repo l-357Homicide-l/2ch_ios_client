@@ -76,7 +76,7 @@ public struct QuotePreviewSheet: View {
             .navigationTitle("Ответ на >>\(currentPost.num)")
             .navigationBarTitleDisplayMode(.inline)
             .environment(\.openURL, OpenURLAction { url in
-                if url.scheme == "2ch-quote" {
+                if url.scheme == "makaba-quote" || url.scheme == "2ch-quote" {
                     let targetStr = url.host ?? url.path.replacingOccurrences(of: "/", with: "")
                     if let targetNum = Int(targetStr) {
                         if let target = allPosts.first(where: { $0.num == targetNum }) {

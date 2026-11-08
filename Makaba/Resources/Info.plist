@@ -46,7 +46,7 @@
 			<string>org.2ch.quote</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>2ch-quote</string>
+				<string>makaba-quote</string>
 			</array>
 		</dict>
 	</array>

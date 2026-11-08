@@ -118,10 +118,10 @@ public final class DomainConfigurationService: ObservableObject, @unchecked Send
         }
         _domain = normalized
         UserDefaults.standard.set(normalized, forKey: userDefaultsKey)
+        self.activeDomain = normalized
         lock.unlock()
 
-        DispatchQueue.main.async { [weak self] in
-            self?.activeDomain = normalized
+        DispatchQueue.main.async {
             NotificationCenter.default.post(
                 name: .makabaDomainDidChange,
                 object: normalized
@@ -147,10 +147,14 @@ public final class DomainConfigurationService: ObservableObject, @unchecked Send
             UserDefaults.standard.set(internalCustomMirrors, forKey: customMirrorsKey)
         }
         let updated = internalCustomMirrors
+        self.customMirrors = updated
         lock.unlock()
 
-        DispatchQueue.main.async { [weak self] in
-            self?.customMirrors = updated
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(
+                name: .makabaDomainDidChange,
+                object: normalized
+            )
         }
         return (true, "Зеркало добавлено.")
     }
@@ -161,14 +165,12 @@ public final class DomainConfigurationService: ObservableObject, @unchecked Send
         internalCustomMirrors.removeAll { $0 == mirror }
         UserDefaults.standard.set(internalCustomMirrors, forKey: customMirrorsKey)
         let updated = internalCustomMirrors
+        self.customMirrors = updated
         let isCurrent = (_domain == mirror)
         lock.unlock()
 
         if isCurrent {
             setDomain(Self.defaultDomain)
-        }
-        DispatchQueue.main.async { [weak self] in
-            self?.customMirrors = updated
         }
     }
 
@@ -184,10 +186,10 @@ public final class DomainConfigurationService: ObservableObject, @unchecked Send
         } else {
             UserDefaults.standard.removeObject(forKey: passcodeKey)
         }
+        self.passcodeToken = finalToken
         lock.unlock()
 
-        DispatchQueue.main.async { [weak self] in
-            self?.passcodeToken = finalToken
+        DispatchQueue.main.async {
             NotificationCenter.default.post(
                 name: .makabaPasscodeDidChange,
                 object: finalToken
@@ -206,10 +208,10 @@ public final class DomainConfigurationService: ObservableObject, @unchecked Send
         let nextMirror = pool[nextIndex]
         _domain = nextMirror
         UserDefaults.standard.set(nextMirror, forKey: userDefaultsKey)
+        self.activeDomain = nextMirror
         lock.unlock()
 
-        DispatchQueue.main.async { [weak self] in
-            self?.activeDomain = nextMirror
+        DispatchQueue.main.async {
             NotificationCenter.default.post(
                 name: .makabaDomainDidChange,
                 object: nextMirror

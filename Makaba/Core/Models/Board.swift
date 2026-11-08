@@ -25,7 +25,7 @@ public struct BoardIcon: Codable, Identifiable, Hashable, Sendable {
             return URL(string: url)
         }
         let cleanPath = url.hasPrefix("/") ? url : "/\(url)"
-        return URL(string: "https://2ch.org\(cleanPath)")
+        return DomainConfigurationService.shared.buildURL(path: cleanPath)
     }
 }
 

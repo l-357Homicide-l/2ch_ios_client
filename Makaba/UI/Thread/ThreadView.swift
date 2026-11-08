@@ -185,7 +185,7 @@ public struct ThreadView: View {
                     .disabled(viewModel.isRefreshing)
 
                     // Share Thread Link
-                    if let threadURL = URL(string: "https://2ch.org/\(viewModel.boardId)/res/\(viewModel.threadNum).html") {
+                    if let threadURL = DomainConfigurationService.shared.buildURL(path: "/\(viewModel.boardId)/res/\(viewModel.threadNum).html") {
                         ShareLink(item: threadURL) {
                             Image(systemName: "square.and.arrow.up")
                         }

@@ -18,6 +18,9 @@
 		0D80F4EAB7EA9FBF8B4D6C78 /* Thread.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C393EC818709626F7F30AB2 /* Thread.swift */; };
 		3ED815DD3F2EB55C87629F98 /* Endpoints.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5013A1321CBDD2050D052C48 /* Endpoints.swift */; };
 		55B4951EE02C1C4E478A77D2 /* MakabaAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB01B1BD8F7BE5BE096B2F1A /* MakabaAPIClient.swift */; };
+		A1110001B7EA9FBF8B4D6C78 /* DomainConfigurationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B111000118709626F7F30AB2 /* DomainConfigurationService.swift */; };
+		A1110002B7EA9FBF8B4D6C78 /* DomainConfigurationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B111000218709626F7F30AB2 /* DomainConfigurationTests.swift */; };
+		A1110003B7EA9FBF8B4D6C78 /* MultipartStreamingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B111000318709626F7F30AB2 /* MultipartStreamingTests.swift */; };
 		1FEE62474C15AB0178AB6B6E /* MultipartFormData.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC2D500E4EFE6536F1398671 /* MultipartFormData.swift */; };
 		2BD208ACBB316A6D728A1138 /* PoWSolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20F3FB4548FA31E4B7C54826 /* PoWSolver.swift */; };
 		AA4238817A92D88C3D3050D7 /* MakabaHTMLParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = C08EF29D2EE299B71799D1C6 /* MakabaHTMLParser.swift */; };
@@ -68,6 +71,9 @@
 		1C393EC818709626F7F30AB2 /* Thread.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Thread.swift; sourceTree = "<group>"; };
 		5013A1321CBDD2050D052C48 /* Endpoints.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Endpoints.swift; sourceTree = "<group>"; };
 		FB01B1BD8F7BE5BE096B2F1A /* MakabaAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MakabaAPIClient.swift; sourceTree = "<group>"; };
+		B111000118709626F7F30AB2 /* DomainConfigurationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DomainConfigurationService.swift; sourceTree = "<group>"; };
+		B111000218709626F7F30AB2 /* DomainConfigurationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DomainConfigurationTests.swift; sourceTree = "<group>"; };
+		B111000318709626F7F30AB2 /* MultipartStreamingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultipartStreamingTests.swift; sourceTree = "<group>"; };
 		FC2D500E4EFE6536F1398671 /* MultipartFormData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultipartFormData.swift; sourceTree = "<group>"; };
 		20F3FB4548FA31E4B7C54826 /* PoWSolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PoWSolver.swift; sourceTree = "<group>"; };
 		C08EF29D2EE299B71799D1C6 /* MakabaHTMLParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MakabaHTMLParser.swift; sourceTree = "<group>"; };
@@ -147,6 +153,7 @@
 			isa = PBXGroup;
 			children = (
 				5013A1321CBDD2050D052C48 /* Endpoints.swift */,
+				B111000118709626F7F30AB2 /* DomainConfigurationService.swift */,
 				FB01B1BD8F7BE5BE096B2F1A /* MakabaAPIClient.swift */,
 				FC2D500E4EFE6536F1398671 /* MultipartFormData.swift */,
 			);
@@ -255,6 +262,8 @@
 				588564280FBF31F8378BF535 /* PoWSolverTests.swift */,
 				10DBD9AD3326BF8F26E8D648 /* HTMLParserTests.swift */,
 				85A7DD20B08AB770AB3AE804 /* PostingPayloadTests.swift */,
+				B111000218709626F7F30AB2 /* DomainConfigurationTests.swift */,
+				B111000318709626F7F30AB2 /* MultipartStreamingTests.swift */,
 			);
 			path = MakabaTests;
 			sourceTree = "<group>";
@@ -407,6 +416,7 @@
 				0D80F4EAB7EA9FBF8B4D6C78 /* Thread.swift in Sources */,
 				3ED815DD3F2EB55C87629F98 /* Endpoints.swift in Sources */,
 				55B4951EE02C1C4E478A77D2 /* MakabaAPIClient.swift in Sources */,
+				A1110001B7EA9FBF8B4D6C78 /* DomainConfigurationService.swift in Sources */,
 				1FEE62474C15AB0178AB6B6E /* MultipartFormData.swift in Sources */,
 				2BD208ACBB316A6D728A1138 /* PoWSolver.swift in Sources */,
 				AA4238817A92D88C3D3050D7 /* MakabaHTMLParser.swift in Sources */,
@@ -430,6 +440,8 @@
 				29A41C4E945C531254CA4D8F /* PoWSolverTests.swift in Sources */,
 				7A29D8CA754498602D622853 /* HTMLParserTests.swift in Sources */,
 				FCE043660DBF183E6D34AEDD /* PostingPayloadTests.swift in Sources */,
+				A1110002B7EA9FBF8B4D6C78 /* DomainConfigurationTests.swift in Sources */,
+				A1110003B7EA9FBF8B4D6C78 /* MultipartStreamingTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

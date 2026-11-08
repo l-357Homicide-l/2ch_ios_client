@@ -24,9 +24,9 @@ public enum MakabaEndpoint: Sendable {
     case media(path: String)
     case thumbnail(path: String)
 
-    /// Base host domain for 2ch.org.
+    /// Dynamic base host domain from mirror configuration service.
     public static var defaultBaseURL: URL {
-        return URL(string: "https://2ch.org")!
+        return DomainConfigurationService.shared.baseURL
     }
 
     /// Constructs the relative URL path for the endpoint.

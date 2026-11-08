@@ -106,16 +106,18 @@ public struct PostRowView: View {
         }
     }
 
-    /// Direct permalink URL to this specific post on 2ch.org.
+    /// Direct permalink URL to this specific post on 2ch.
     public var postPermalinkURL: URL? {
+        let path: String
         if let board = boardId, !board.isEmpty {
             let parentThread = threadNum ?? (post.parent != nil && post.parent != 0 ? post.parent! : post.num)
-            return URL(string: "https://2ch.org/\(board)/res/\(parentThread).html#\(post.num)")
+            path = "/\(board)/res/\(parentThread).html#\(post.num)"
         } else if let parent = post.parent, parent != 0 {
-            return URL(string: "https://2ch.org/res/\(parent).html#\(post.num)")
+            path = "/res/\(parent).html#\(post.num)"
         } else {
-            return URL(string: "https://2ch.org/res/\(post.num).html#\(post.num)")
+            path = "/res/\(post.num).html#\(post.num)"
         }
+        return DomainConfigurationService.shared.buildURL(path: path)
     }
 
     // MARK: - Subviews

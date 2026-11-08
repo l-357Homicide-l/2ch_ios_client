@@ -386,7 +386,7 @@ public struct WebKitPlayerBridgeView: UIViewRepresentable {
             )
 
             isPageLoaded = false
-            webView.loadHTMLString(htmlContent, baseURL: URL(string: "https://2ch.org/"))
+            webView.loadHTMLString(htmlContent, baseURL: DomainConfigurationService.shared.baseURL)
         }
 
         public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -1103,10 +1103,10 @@ public struct WebMPlayerView: View {
                 return fullURL
             }
             if let encodedPath = file.path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
-               let url = URL(string: "https://2ch.org\(encodedPath)") {
+               let url = DomainConfigurationService.shared.buildURL(path: encodedPath) {
                 return url
             }
-            return URL(string: "https://2ch.org") ?? URL(fileURLWithPath: "/")
+            return DomainConfigurationService.shared.baseURL
         }()
 
         self.init(

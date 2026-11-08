@@ -111,6 +111,7 @@ public final class BoardListViewModel: ObservableObject {
 public struct BoardListView: View {
     @EnvironmentObject private var apiClient: MakabaAPIClient
     @EnvironmentObject private var favoritesManager: FavoritesManager
+    @ObservedObject private var domainConfig = DomainConfigurationService.shared
 
     @StateObject private var viewModel: BoardListViewModel
 
@@ -141,6 +142,50 @@ public struct BoardListView: View {
             placement: .navigationBarDrawer(displayMode: .automatic),
             prompt: "Поиск досок (/b/, Игры, Техника...)"
         )
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Menu {
+                    Section("Зеркала 2ch") {
+                        ForEach(DomainConfigurationService.availableMirrors, id: \.self) { mirror in
+                            Button {
+                                domainConfig.setDomain(mirror)
+                                Task {
+                                    await viewModel.loadBoards()
+                                }
+                            } label: {
+                                HStack {
+                                    Text(mirror.replacingOccurrences(of: "https://", with: ""))
+                                    if domainConfig.currentDomain == mirror {
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Section {
+                        Button {
+                            Task {
+                                await domainConfig.autoSelectFastestMirror()
+                                await viewModel.loadBoards()
+                            }
+                        } label: {
+                            Label("Выбрать быстрейшее зеркало", systemImage: "bolt.fill")
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "network")
+                        Text(domainConfig.activeHost)
+                            .font(.caption.weight(.medium))
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.secondary.opacity(0.12))
+                    .cornerRadius(8)
+                }
+            }
+        }
         .refreshable {
             await viewModel.loadBoards()
         }
@@ -206,7 +251,7 @@ public struct BoardListView: View {
         VStack(spacing: 16) {
             ProgressView()
                 .scaleEffect(1.2)
-            Text("Загрузка списка досок 2ch.org...")
+            Text("Загрузка списка досок \(domainConfig.activeHost)...")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
         }

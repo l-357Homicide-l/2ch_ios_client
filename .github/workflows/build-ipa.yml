@@ -37,6 +37,19 @@ jobs:
             -project Makaba.xcodeproj \
             -scheme Makaba
 
+      - name: Run Unit & Integration Tests
+        run: |
+          SIMULATOR_NAME=$(xcrun simctl list devices available | grep -m 1 "iPhone" | sed -E 's/^[[:space:]]*([^(]+)[[:space:]]*\(.*/\1/' | xargs)
+          echo "Selected Simulator for testing: $SIMULATOR_NAME"
+          xcodebuild test \
+            -project Makaba.xcodeproj \
+            -scheme Makaba \
+            -destination "platform=iOS Simulator,name=${SIMULATOR_NAME:-iPhone 16}" \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
+
       - name: Build and Archive (Unsigned)
         run: |
           xcodebuild archive \

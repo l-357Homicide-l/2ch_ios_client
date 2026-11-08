@@ -154,7 +154,7 @@ public struct MediaFile: Codable, Identifiable, Hashable, Sendable {
         }
         let cleanPath = path.hasPrefix("/") ? path : "/\(path)"
         let escapedPath = cleanPath.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? cleanPath
-        return URL(string: "https://2ch.org\(escapedPath)")
+        return DomainConfigurationService.shared.buildURL(path: escapedPath)
     }
 
     /// Absolute URL pointing to the preview thumbnail (always JPEG) with percent-encoding.
@@ -166,7 +166,7 @@ public struct MediaFile: Codable, Identifiable, Hashable, Sendable {
         }
         let cleanPath = thumb.hasPrefix("/") ? thumb : "/\(thumb)"
         let escapedPath = cleanPath.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? cleanPath
-        return URL(string: "https://2ch.org\(escapedPath)")
+        return DomainConfigurationService.shared.buildURL(path: escapedPath)
     }
 
     /// Whether this file requires video playback engines.

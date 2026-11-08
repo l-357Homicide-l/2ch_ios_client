@@ -101,16 +101,22 @@ public final class MakabaAPIClient: ObservableObject, Sendable {
     /// Shared singleton instance guaranteeing unified URLSession and isolated cache across the app.
     public static let shared = MakabaAPIClient()
 
-    public let baseURL: URL
+    private let customBaseURL: URL?
+
+    /// Active base URL dynamically queried from mirror configuration service unless overridden.
+    public var baseURL: URL {
+        return customBaseURL ?? DomainConfigurationService.shared.baseURL
+    }
+
     public let session: URLSession
     public let passcodeToken: String?
 
     public init(
-        baseURL: URL = MakabaEndpoint.defaultBaseURL,
+        baseURL: URL? = nil,
         session: URLSession? = nil,
         passcodeToken: String? = nil
     ) {
-        self.baseURL = baseURL
+        self.customBaseURL = baseURL
         if let customSession = session {
             self.session = customSession
         } else {
@@ -346,11 +352,7 @@ public final class MakabaAPIClient: ObservableObject, Sendable {
 
         let (data, response): (Data, URLResponse)
         if let tempURL = tempURL {
-            do {
-                (data, response) = try await session.upload(for: req, fromFile: tempURL)
-            } catch {
-                throw MakabaAPIError.networkError(error.localizedDescription)
-            }
+            (data, response) = try await uploadWithFailover(request: req, fileURL: tempURL)
         } else {
             req.httpBody = multipart.build()
             (data, response) = try await execute(request: req)
@@ -410,10 +412,96 @@ public final class MakabaAPIClient: ObservableObject, Sendable {
     // MARK: - Internal Networking Helpers
 
     private func execute(request: URLRequest) async throws -> (Data, URLResponse) {
-        do {
-            return try await session.data(for: request)
-        } catch {
-            throw MakabaAPIError.networkError(error.localizedDescription)
+        var currentReq = request
+        let maxAttempts = min(DomainConfigurationService.availableMirrors.count, 3)
+        var lastError: Error?
+
+        for attempt in 0..<maxAttempts {
+            do {
+                let (data, response) = try await session.data(for: currentReq)
+                if let http = response as? HTTPURLResponse, (502...504).contains(http.statusCode), attempt < maxAttempts - 1 {
+                    let nextMirror = DomainConfigurationService.shared.failoverToNextMirror()
+                    if let origURL = currentReq.url,
+                       let newURL = DomainConfigurationService.shared.rewriteURL(origURL, to: nextMirror) {
+                        currentReq.url = newURL
+                        continue
+                    }
+                }
+                return (data, response)
+            } catch let urlError as URLError {
+                lastError = urlError
+                if isFailoverWorthy(urlError) && attempt < maxAttempts - 1 {
+                    let nextMirror = DomainConfigurationService.shared.failoverToNextMirror()
+                    if let origURL = currentReq.url,
+                       let newURL = DomainConfigurationService.shared.rewriteURL(origURL, to: nextMirror) {
+                        currentReq.url = newURL
+                        continue
+                    }
+                }
+                throw MakabaAPIError.networkError(urlError.localizedDescription)
+            } catch {
+                throw MakabaAPIError.networkError(error.localizedDescription)
+            }
+        }
+        if let last = lastError {
+            throw MakabaAPIError.networkError(last.localizedDescription)
+        }
+        throw MakabaAPIError.invalidResponse
+    }
+
+    private func uploadWithFailover(request: URLRequest, fileURL: URL) async throws -> (Data, URLResponse) {
+        var currentReq = request
+        let maxAttempts = min(DomainConfigurationService.availableMirrors.count, 3)
+        var lastError: Error?
+
+        for attempt in 0..<maxAttempts {
+            do {
+                let (data, response) = try await session.upload(for: currentReq, fromFile: fileURL)
+                if let http = response as? HTTPURLResponse, (502...504).contains(http.statusCode), attempt < maxAttempts - 1 {
+                    let nextMirror = DomainConfigurationService.shared.failoverToNextMirror()
+                    if let origURL = currentReq.url,
+                       let newURL = DomainConfigurationService.shared.rewriteURL(origURL, to: nextMirror) {
+                        currentReq.url = newURL
+                        continue
+                    }
+                }
+                return (data, response)
+            } catch let urlError as URLError {
+                lastError = urlError
+                if isFailoverWorthy(urlError) && attempt < maxAttempts - 1 {
+                    let nextMirror = DomainConfigurationService.shared.failoverToNextMirror()
+                    if let origURL = currentReq.url,
+                       let newURL = DomainConfigurationService.shared.rewriteURL(origURL, to: nextMirror) {
+                        currentReq.url = newURL
+                        continue
+                    }
+                }
+                throw MakabaAPIError.networkError(urlError.localizedDescription)
+            } catch {
+                throw MakabaAPIError.networkError(error.localizedDescription)
+            }
+        }
+        if let last = lastError {
+            throw MakabaAPIError.networkError(last.localizedDescription)
+        }
+        throw MakabaAPIError.invalidResponse
+    }
+
+    private func isFailoverWorthy(_ error: URLError) -> Bool {
+        switch error.code {
+        case .cannotConnectToHost,
+             .cannotFindHost,
+             .dnsLookupFailed,
+             .timedOut,
+             .networkConnectionLost,
+             .secureConnectionFailed,
+             .serverCertificateHasBadDate,
+             .serverCertificateUntrusted,
+             .serverCertificateHasUnknownRoot,
+             .serverCertificateNotYetValid:
+            return true
+        default:
+            return false
         }
     }
 

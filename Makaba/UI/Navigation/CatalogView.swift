@@ -1,0 +1,594 @@
+//
+//  CatalogView.swift
+//  Makaba
+//
+//  Grid and List catalog browser with sorting, search, and thread previews.
+//
+
+import SwiftUI
+import UIKit
+
+// MARK: - Catalog Display & Sort Enums
+
+public enum CatalogDisplayMode: String, CaseIterable, Identifiable {
+    case grid = "Сетка"
+    case list = "Список"
+
+    public var id: String { rawValue }
+
+    public var iconName: String {
+        switch self {
+        case .grid: return "square.grid.2x2"
+        case .list: return "list.bullet"
+        }
+    }
+}
+
+public enum CatalogSortMode: String, CaseIterable, Identifiable {
+    case bump = "По бампу"
+    case replies = "По ответам"
+    case score = "По оценке"
+    case newest = "Сначала новые"
+
+    public var id: String { rawValue }
+
+    public var iconName: String {
+        switch self {
+        case .bump: return "arrow.up.and.down"
+        case .replies: return "bubble.left.and.bubble.right"
+        case .score: return "hand.thumbsup"
+        case .newest: return "clock"
+        }
+    }
+}
+
+// MARK: - Catalog View Model
+
+@MainActor
+public final class CatalogViewModel: ObservableObject {
+    public let board: Board
+
+    @Published public var threads: [CatalogThreadItem] = []
+    @Published public var isLoading: Bool = false
+    @Published public var errorMessage: String? = nil
+    @Published public var searchText: String = ""
+    @Published public var displayMode: CatalogDisplayMode = .grid
+    @Published public var sortMode: CatalogSortMode = .bump
+
+    private let apiClient: MakabaAPIClient
+
+    public init(board: Board, apiClient: MakabaAPIClient = MakabaAPIClient()) {
+        self.board = board
+        self.apiClient = apiClient
+    }
+
+    public func loadCatalog() async {
+        isLoading = true
+        errorMessage = nil
+
+        do {
+            let response = try await apiClient.fetchCatalog(board: board.id)
+            self.threads = response.threads
+            self.isLoading = false
+        } catch {
+            self.errorMessage = error.localizedDescription
+            self.isLoading = false
+        }
+    }
+
+    /// Filtered and sorted thread list according to search query and sort mode.
+    public var filteredThreads: [CatalogThreadItem] {
+        var result = threads
+
+        // Search filtering
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if !query.isEmpty {
+            result = result.filter { thread in
+                thread.subject.lowercased().contains(query) ||
+                thread.comment.lowercased().contains(query) ||
+                String(thread.num).contains(query)
+            }
+        }
+
+        // Sorting
+        switch sortMode {
+        case .bump:
+            result.sort {
+                if $0.isPinned != $1.isPinned {
+                    return $0.isPinned && !$1.isPinned
+                }
+                return $0.lasthit > $1.lasthit
+            }
+        case .replies:
+            result.sort {
+                if $0.isPinned != $1.isPinned {
+                    return $0.isPinned && !$1.isPinned
+                }
+                return $0.postsCount > $1.postsCount
+            }
+        case .score:
+            result.sort {
+                if $0.isPinned != $1.isPinned {
+                    return $0.isPinned && !$1.isPinned
+                }
+                return ($0.score ?? 0) > ($1.score ?? 0)
+            }
+        case .newest:
+            result.sort {
+                if $0.isPinned != $1.isPinned {
+                    return $0.isPinned && !$1.isPinned
+                }
+                return $0.timestamp > $1.timestamp
+            }
+        }
+
+        return result
+    }
+}
+
+// MARK: - Catalog View
+
+@MainActor
+public struct CatalogView: View {
+    @EnvironmentObject private var apiClient: MakabaAPIClient
+    @StateObject private var viewModel: CatalogViewModel
+    @State private var isNewThreadSheetPresented: Bool = false
+
+    public init(board: Board, apiClient: MakabaAPIClient = MakabaAPIClient()) {
+        self._viewModel = StateObject(wrappedValue: CatalogViewModel(board: board, apiClient: apiClient))
+    }
+
+    public var body: some View {
+        Group {
+            if viewModel.isLoading && viewModel.threads.isEmpty {
+                loadingView
+            } else if let error = viewModel.errorMessage, viewModel.threads.isEmpty {
+                errorView(error)
+            } else if viewModel.filteredThreads.isEmpty {
+                emptyStateView
+            } else {
+                contentView
+            }
+        }
+        .navigationTitle("/\(viewModel.board.id)/ — \(viewModel.board.name)")
+        .navigationBarTitleDisplayMode(.inline)
+        .searchable(
+            text: $viewModel.searchText,
+            placement: .navigationBarDrawer(displayMode: .automatic),
+            prompt: "Поиск в каталоге /\(viewModel.board.id)/"
+        )
+        .toolbar {
+            ToolbarItemGroup(placement: .navigationBarTrailing) {
+                // New Thread Button
+                Button {
+                    isNewThreadSheetPresented = true
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .accessibilityLabel("Новый тред")
+
+                // Sort Menu
+                Menu {
+                    Picker("Сортировка", selection: $viewModel.sortMode) {
+                        ForEach(CatalogSortMode.allCases) { mode in
+                            Label(mode.rawValue, systemImage: mode.iconName).tag(mode)
+                        }
+                    }
+                } label: {
+                    Image(systemName: viewModel.sortMode.iconName)
+                }
+
+                // Grid / List Toggle
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        viewModel.displayMode = (viewModel.displayMode == .grid) ? .list : .grid
+                    }
+                } label: {
+                    Image(systemName: viewModel.displayMode == .grid ? "list.bullet" : "square.grid.2x2")
+                }
+            }
+        }
+        .sheet(isPresented: $isNewThreadSheetPresented) {
+            PostingSheet(
+                board: viewModel.board.id,
+                threadNum: nil,
+                apiClient: apiClient,
+                onPostSuccess: { _ in
+                    Task {
+                        await viewModel.loadCatalog()
+                    }
+                }
+            )
+        }
+        .refreshable {
+            await viewModel.loadCatalog()
+        }
+        .task {
+            if viewModel.threads.isEmpty {
+                await viewModel.loadCatalog()
+            }
+        }
+    }
+
+    // MARK: - Main Content
+
+    @ViewBuilder
+    private var contentView: some View {
+        ScrollView {
+            if viewModel.displayMode == .grid {
+                LazyVGrid(
+                    columns: [
+                        GridItem(.adaptive(minimum: 160, maximum: 240), spacing: 12)
+                    ],
+                    spacing: 12
+                ) {
+                    ForEach(viewModel.filteredThreads) { thread in
+                        NavigationLink(value: thread) {
+                            CatalogGridCard(thread: thread)
+                        }
+                        .buttonStyle(PlainNavigationButtonStyle())
+                    }
+                }
+                .padding(12)
+            } else {
+                LazyVStack(spacing: 8) {
+                    ForEach(viewModel.filteredThreads) { thread in
+                        NavigationLink(value: thread) {
+                            CatalogListRow(thread: thread)
+                        }
+                        .buttonStyle(PlainNavigationButtonStyle())
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+            }
+        }
+        .navigationDestination(for: CatalogThreadItem.self) { thread in
+            ThreadView(
+                boardId: thread.board ?? viewModel.board.id,
+                threadNum: thread.num,
+                threadSubject: thread.displayTitle,
+                apiClient: apiClient
+            )
+        }
+    }
+
+    // MARK: - State Views
+
+    private var loadingView: some View {
+        VStack(spacing: 16) {
+            ProgressView()
+                .scaleEffect(1.2)
+            Text("Загрузка каталога /\(viewModel.board.id)/...")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func errorView(_ message: String) -> some View {
+        VStack(spacing: 16) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 44))
+                .foregroundColor(.orange)
+            Text("Не удалось загрузить каталог")
+                .font(.headline)
+            Text(message)
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
+            Button {
+                Task {
+                    await viewModel.loadCatalog()
+                }
+            } label: {
+                Label("Повторить", systemImage: "arrow.clockwise")
+            }
+            .buttonStyle(.borderedProminent)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var emptyStateView: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "tray.fill")
+                .font(.system(size: 40))
+                .foregroundColor(.secondary)
+            Text("Треды не найдены")
+                .font(.headline)
+            Text("Попробуйте изменить поисковый запрос или обновить каталог.")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+// MARK: - Plain Navigation Button Style
+// Prevents default blue button tint while maintaining tap feedback
+struct PlainNavigationButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.85 : 1.0)
+            .scaleEffect(configuration.isPressed ? 0.98 : 1.0)
+            .animation(.easeInOut(duration: 0.15), value: configuration.isPressed)
+    }
+}
+
+// MARK: - Catalog Grid Card
+
+public struct CatalogGridCard: View {
+    public let thread: CatalogThreadItem
+
+    public var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // Thumbnail with badge overlays
+            ZStack(alignment: .topTrailing) {
+                thumbnailView
+
+                // Sticky / Locked / Endless Indicators
+                HStack(spacing: 4) {
+                    if thread.isPinned {
+                        Image(systemName: "pin.fill")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(.white)
+                            .padding(4)
+                            .background(Color.red.opacity(0.85))
+                            .clipShape(Circle())
+                    }
+                    if thread.isLocked {
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(.white)
+                            .padding(4)
+                            .background(Color.black.opacity(0.75))
+                            .clipShape(Circle())
+                    }
+                    if thread.isEndless {
+                        Image(systemName: "infinity")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(.white)
+                            .padding(4)
+                            .background(Color.blue.opacity(0.75))
+                            .clipShape(Circle())
+                    }
+                }
+                .padding(6)
+            }
+
+            // Subject / Title
+            Text(thread.displayTitle)
+                .font(.system(.subheadline, design: .default).weight(.semibold))
+                .foregroundColor(.primary)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+
+            // Excerpt of Comment
+            if !cleanCommentExcerpt.isEmpty {
+                Text(cleanCommentExcerpt)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .lineLimit(3)
+                    .multilineTextAlignment(.leading)
+            }
+
+            Spacer(minLength: 0)
+
+            // Bottom Badges: Replies, Files, Score
+            HStack(spacing: 8) {
+                // Replies count
+                HStack(spacing: 3) {
+                    Image(systemName: "bubble.left.fill")
+                        .font(.system(size: 10))
+                    Text("\(thread.postsCount)")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .foregroundColor(.secondary)
+
+                // Files count
+                if thread.filesCount > 0 {
+                    HStack(spacing: 3) {
+                        Image(systemName: "paperclip")
+                            .font(.system(size: 10))
+                        Text("\(thread.filesCount)")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .foregroundColor(.secondary)
+                }
+
+                Spacer()
+
+                // Score
+                if let score = thread.score, score != 0 {
+                    Text(score > 0 ? "+\(score)" : "\(score)")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(score > 0 ? .green : .red)
+                }
+            }
+            .padding(.top, 2)
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(UIColor.secondarySystemGroupedBackground))
+                .shadow(color: Color.black.opacity(0.06), radius: 4, x: 0, y: 2)
+        )
+    }
+
+    private var thumbnailView: some View {
+        Group {
+            if let primary = thread.primaryFile, let thumbURL = primary.thumbnailURL {
+                AsyncImage(url: thumbURL) { phase in
+                    switch phase {
+                    case .empty:
+                        Rectangle()
+                            .fill(Color.secondary.opacity(0.15))
+                            .overlay(ProgressView().scaleEffect(0.8))
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    case .failure:
+                        Rectangle()
+                            .fill(Color.secondary.opacity(0.15))
+                            .overlay(
+                                Image(systemName: "photo")
+                                    .foregroundColor(.secondary)
+                            )
+                    @unknown default:
+                        EmptyView()
+                    }
+                }
+            } else {
+                Rectangle()
+                    .fill(Color.secondary.opacity(0.1))
+                    .overlay(
+                        Image(systemName: "text.bubble")
+                            .foregroundColor(.secondary)
+                    )
+            }
+        }
+        .frame(height: 120)
+        .clipped()
+        .cornerRadius(8)
+    }
+
+    private var cleanCommentExcerpt: String {
+        thread.comment
+            .replacingOccurrences(of: "<br/?>", with: " ", options: .regularExpression)
+            .replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+            .replacingOccurrences(of: "&quot;", with: "\"")
+            .replacingOccurrences(of: "&gt;", with: ">")
+            .replacingOccurrences(of: "&lt;", with: "<")
+            .replacingOccurrences(of: "&amp;", with: "&")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+// MARK: - Catalog List Row
+
+public struct CatalogListRow: View {
+    public let thread: CatalogThreadItem
+
+    public var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            // Thumbnail
+            ZStack(alignment: .topLeading) {
+                thumbnailView
+
+                // Sticky/Locked Badge
+                if thread.isPinned {
+                    Image(systemName: "pin.fill")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(3)
+                        .background(Color.red.opacity(0.85))
+                        .clipShape(Circle())
+                        .padding(4)
+                }
+            }
+
+            // Info Column
+            VStack(alignment: .leading, spacing: 4) {
+                // Title and Post ID
+                HStack(spacing: 6) {
+                    Text(thread.displayTitle)
+                        .font(.system(.subheadline, design: .default).weight(.semibold))
+                        .foregroundColor(.primary)
+                        .lineLimit(1)
+
+                    Spacer()
+
+                    Text("#\(thread.num)")
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundColor(.secondary)
+                }
+
+                // Comment excerpt
+                if !cleanCommentExcerpt.isEmpty {
+                    Text(cleanCommentExcerpt)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .lineLimit(2)
+                }
+
+                // Metadata Footer
+                HStack(spacing: 12) {
+                    // Replies
+                    Label("\(thread.postsCount)", systemImage: "bubble.left.fill")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.secondary)
+
+                    // Files
+                    if thread.filesCount > 0 {
+                        Label("\(thread.filesCount)", systemImage: "paperclip")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.secondary)
+                    }
+
+                    Spacer()
+
+                    // Score
+                    if let score = thread.score, score != 0 {
+                        Text(score > 0 ? "+\(score)" : "\(score)")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(score > 0 ? .green : .red)
+                    }
+                }
+                .padding(.top, 4)
+            }
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color(UIColor.secondarySystemGroupedBackground))
+                .shadow(color: Color.black.opacity(0.04), radius: 3, x: 0, y: 1)
+        )
+    }
+
+    private var thumbnailView: some View {
+        Group {
+            if let primary = thread.primaryFile, let thumbURL = primary.thumbnailURL {
+                AsyncImage(url: thumbURL) { phase in
+                    switch phase {
+                    case .empty:
+                        Rectangle()
+                            .fill(Color.secondary.opacity(0.15))
+                            .overlay(ProgressView().scaleEffect(0.7))
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    case .failure:
+                        Rectangle()
+                            .fill(Color.secondary.opacity(0.15))
+                            .overlay(Image(systemName: "photo").foregroundColor(.secondary))
+                    @unknown default:
+                        EmptyView()
+                    }
+                }
+            } else {
+                Rectangle()
+                    .fill(Color.secondary.opacity(0.1))
+                    .overlay(Image(systemName: "text.bubble").foregroundColor(.secondary))
+            }
+        }
+        .frame(width: 76, height: 76)
+        .clipped()
+        .cornerRadius(8)
+    }
+
+    private var cleanCommentExcerpt: String {
+        thread.comment
+            .replacingOccurrences(of: "<br/?>", with: " ", options: .regularExpression)
+            .replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+            .replacingOccurrences(of: "&quot;", with: "\"")
+            .replacingOccurrences(of: "&gt;", with: ">")
+            .replacingOccurrences(of: "&lt;", with: "<")
+            .replacingOccurrences(of: "&amp;", with: "&")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}

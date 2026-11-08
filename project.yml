@@ -1,0 +1,84 @@
+name: Makaba
+options:
+  bundleIdPrefix: org.2ch
+  deploymentTarget:
+    iOS: "16.0"
+  xcodeVersion: "15.4"
+  createIntermediateGroups: true
+  groupSortPosition: top
+
+packages:
+  KSPlayer:
+    url: https://github.com/kingslay/KSPlayer.git
+    from: 2.3.0
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+    TARGETED_DEVICE_FAMILY: "1,2"
+    ENABLE_BITCODE: "NO"
+
+targets:
+  Makaba:
+    type: application
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: Makaba
+    dependencies:
+      - framework: SwiftUI.framework
+        implicit: true
+      - framework: AVFoundation.framework
+        implicit: true
+      - framework: WebKit.framework
+        implicit: true
+      - framework: CryptoKit.framework
+        implicit: true
+      - framework: PhotosUI.framework
+        implicit: true
+      - framework: UniformTypeIdentifiers.framework
+        implicit: true
+      - framework: Combine.framework
+        implicit: true
+      - package: KSPlayer
+        product: KSPlayer
+        optional: true
+    settings:
+      base:
+        PRODUCT_NAME: Makaba
+        PRODUCT_BUNDLE_IDENTIFIER: org.2ch.Makaba
+        INFOPLIST_FILE: Makaba/Resources/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: ""
+        CODE_SIGNING_REQUIRED: "NO"
+        CODE_SIGNING_ALLOWED: "NO"
+        DEVELOPMENT_TEAM: ""
+        GENERATE_INFOPLIST_FILE: "NO"
+        SWIFT_EMIT_LOC_STRINGS: "YES"
+      configs:
+        Debug:
+          SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "DEBUG"
+        Release:
+          SWIFT_OPTIMIZATION_LEVEL: "-O"
+
+  MakabaTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: MakabaTests
+    dependencies:
+      - target: Makaba
+    settings:
+      base:
+        PRODUCT_NAME: MakabaTests
+        PRODUCT_BUNDLE_IDENTIFIER: org.2ch.MakabaTests
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: ""
+        CODE_SIGNING_REQUIRED: "NO"
+        CODE_SIGNING_ALLOWED: "NO"
+        GENERATE_INFOPLIST_FILE: "YES"

@@ -42,7 +42,7 @@ public final class DomainConfigurationService: ObservableObject, @unchecked Send
     private let userDefaultsKey = "selected_domain"
     private let customMirrorsKey = "custom_mirrors"
     private let passcodeKey = "makaba_passcode_token"
-    private let lock = NSLock()
+    private let lock = NSRecursiveLock()
     private var _domain: String
     private var internalCustomMirrors: [String]
     private var internalPasscodeToken: String?
@@ -199,7 +199,7 @@ public final class DomainConfigurationService: ObservableObject, @unchecked Send
     @discardableResult
     public func failoverToNextMirror() -> String {
         lock.lock()
-        let pool = autoFailoverMirrors.isEmpty ? allMirrors : autoFailoverMirrors
+        let pool = (Self.verifiedMirrors + internalCustomMirrors).isEmpty ? (Self.verifiedMirrors + internalCustomMirrors + Self.fallbackMirrors) : (Self.verifiedMirrors + internalCustomMirrors)
         let current = _domain
         let currentIndex = pool.firstIndex(of: current) ?? 0
         let nextIndex = (currentIndex + 1) % pool.count

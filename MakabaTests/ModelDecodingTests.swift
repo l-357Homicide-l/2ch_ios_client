@@ -436,7 +436,7 @@ final class ModelDecodingTests: XCTestCase {
 
     func test_post_isOP_boundaryConditions() {
         // Condition 1: op == 1
-        let opPost = Post(num: 1, op: 1, comment: "OP")
+        let opPost = Post(num: 1, comment: "OP", op: 1)
         XCTAssertTrue(opPost.isOP)
 
         // Condition 2: parent == 0
@@ -448,7 +448,7 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertTrue(numberOnePost.isOP)
 
         // Condition 4: Regular reply
-        let replyPost = Post(num: 4, number: 2, parent: 1, op: 0, comment: "Reply")
+        let replyPost = Post(num: 4, number: 2, parent: 1, comment: "Reply", op: 0)
         XCTAssertFalse(replyPost.isOP)
     }
 

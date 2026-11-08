@@ -7,12 +7,6 @@
 
 import Foundation
 
-// MARK: - Interface Contract Typealiases (PROJECT.md)
-public typealias CaptchaChallenge = CaptchaChallengeResponse
-public typealias CaptchaImages = CaptchaShowResponse
-public typealias CaptchaClickResult = CaptchaClickResponse
-public typealias PostResult = PostingResponse
-
 /// Specific errors thrown by the Makaba API client.
 public enum MakabaAPIError: Error, LocalizedError, Sendable {
     case invalidURL

@@ -42,7 +42,6 @@
 		3B64ABD458FB7970A2A519A3 /* PhotosUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E9CCC5E0FAC061C1102A9EDA /* PhotosUI.framework */; };
 		16ED1E70C6543387E27873AE /* UniformTypeIdentifiers.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 907E606AE378E2013DDB7729 /* UniformTypeIdentifiers.framework */; };
 		4AC698FCB5B18684F28F05A4 /* Combine.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8BBA011FF6B12D6AC4EC23A5 /* Combine.framework */; };
-		44E33F20F013A3CC8ACDC49B /* KSPlayer in Frameworks */ = {isa = PBXBuildFile; productRef = 7E62B44CFF23EE8738AC7840 /* KSPlayer */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -108,7 +107,6 @@
 				3B64ABD458FB7970A2A519A3 /* PhotosUI.framework in Frameworks */,
 				16ED1E70C6543387E27873AE /* UniformTypeIdentifiers.framework in Frameworks */,
 				4AC698FCB5B18684F28F05A4 /* Combine.framework in Frameworks */,
-				44E33F20F013A3CC8ACDC49B /* KSPlayer in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -311,7 +309,6 @@
 			);
 			name = Makaba;
 			packageProductDependencies = (
-				7E62B44CFF23EE8738AC7840 /* KSPlayer */,
 			);
 			productName = Makaba;
 			productReference = 61C10965D5578EBA318AF491 /* Makaba.app */;
@@ -365,7 +362,6 @@
 			);
 			mainGroup = 685415DD8B08A0C375BD735C;
 			packageReferences = (
-				BC1AADE9763F77011D03A292 /* XCRemoteSwiftPackageReference "KSPlayer" */,
 			);
 			productRefGroup = B949E4C49976EB0C7566E16A /* Products */;
 			projectDirPath = "";
@@ -446,25 +442,6 @@
 			targetProxy = FEA39C52F459D2A314729DDF /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
-
-/* Begin XCRemoteSwiftPackageReference section */
-		BC1AADE9763F77011D03A292 /* XCRemoteSwiftPackageReference "KSPlayer" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/kingslay/KSPlayer.git";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 2.3.0;
-			};
-		};
-/* End XCRemoteSwiftPackageReference section */
-
-/* Begin XCSwiftPackageProductDependency section */
-		7E62B44CFF23EE8738AC7840 /* KSPlayer */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = BC1AADE9763F77011D03A292 /* XCRemoteSwiftPackageReference "KSPlayer" */;
-			productName = KSPlayer;
-		};
-/* End XCSwiftPackageProductDependency section */
 
 /* Begin XCBuildConfiguration section */
 		DD238BC121384DCC5114E5C1 /* Debug */ = {

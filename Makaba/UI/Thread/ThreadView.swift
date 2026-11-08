@@ -444,12 +444,6 @@ public struct ThreadView: View {
     }
 }
 
-// MARK: - URL Extension for Identifiable (Sheets)
-
-extension URL: Identifiable {
-    public var id: String { absoluteString }
-}
-
 // MARK: - Safari View Wrapper
 
 public struct SafariView: UIViewControllerRepresentable {

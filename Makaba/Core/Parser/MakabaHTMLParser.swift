@@ -235,7 +235,7 @@ public final class MakabaHTMLParser: Sendable {
         }
 
         if lower == "p" {
-            if !result.characters.isEmpty && !result.characters.description.hasSuffix("\n") {
+            if !result.characters.isEmpty && result.characters.last != "\n" {
                 result.append(AttributedString("\n"))
             }
             return

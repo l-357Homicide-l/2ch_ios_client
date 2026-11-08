@@ -625,6 +625,7 @@ public struct AVPlayerBridgeView: UIViewRepresentable {
 
     // MARK: - Coordinator for AVPlayer Lifecycle
 
+    @MainActor
     public final class Coordinator: NSObject {
         private weak var model: WebMPlayerModel?
         private var player: AVPlayer?

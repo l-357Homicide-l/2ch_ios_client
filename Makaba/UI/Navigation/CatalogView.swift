@@ -79,15 +79,15 @@ public final class CatalogViewModel: ObservableObject {
                         num: opPost.num,
                         parent: 0,
                         board: board.id,
-                        subject: opPost.subject,
+                        subject: opPost.subject ?? "",
                         comment: opPost.comment,
                         date: opPost.date,
                         timestamp: opPost.timestamp,
                         lasthit: opPost.timestamp,
                         views: opPost.views ?? 0,
                         postsCount: threadContainer.posts.count,
-                        filesCount: threadContainer.posts.reduce(0) { $0 + ($1.files?.count ?? 0) },
-                        files: opPost.files ?? []
+                        filesCount: threadContainer.posts.reduce(0) { $0 + $1.files.count },
+                        files: opPost.files
                     )
                 }
                 if !convertedThreads.isEmpty {

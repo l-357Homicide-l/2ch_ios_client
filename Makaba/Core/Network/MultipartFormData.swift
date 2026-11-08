@@ -16,7 +16,7 @@ public struct MultipartFormData: Sendable {
     private let crlf = "\r\n"
 
     private struct Part: Sendable {
-        let headers: [String: String]
+        let headers: [(key: String, value: String)]
         let body: Data
     }
 
@@ -38,7 +38,7 @@ public struct MultipartFormData: Sendable {
     /// Appends a simple UTF-8 text form field.
     public mutating func appendField(name: String, value: String) {
         let headers = [
-            "Content-Disposition": "form-data; name=\"\(name)\""
+            (key: "Content-Disposition", value: "form-data; name=\"\(name)\"")
         ]
         let bodyData = Data(value.utf8)
         parts.append(Part(headers: headers, body: bodyData))
@@ -53,8 +53,8 @@ public struct MultipartFormData: Sendable {
     /// Appends a binary file attachment part.
     public mutating func appendFile(name: String = "file[]", filename: String, mimeType: String, data: Data) {
         let headers = [
-            "Content-Disposition": "form-data; name=\"\(name)\"; filename=\"\(filename)\"",
-            "Content-Type": mimeType
+            (key: "Content-Disposition", value: "form-data; name=\"\(name)\"; filename=\"\(filename)\""),
+            (key: "Content-Type", value: mimeType)
         ]
         parts.append(Part(headers: headers, body: data))
     }

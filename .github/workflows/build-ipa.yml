@@ -46,9 +46,14 @@ jobs:
             -scheme Makaba \
             -destination "platform=iOS Simulator,name=${SIMULATOR_NAME:-iPhone 16}" \
             -configuration Debug \
+            -resultBundlePath build/TestResults.xcresult \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY=""
+            CODE_SIGN_IDENTITY="" || {
+              echo "=== TEST FAILURES SUMMARY ==="
+              xcrun xcresulttool get test-results summary --path build/TestResults.xcresult || true
+              exit 1
+            }
 
       - name: Build and Archive (Unsigned)
         run: |

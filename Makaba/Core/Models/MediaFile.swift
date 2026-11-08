@@ -54,7 +54,7 @@ public struct MediaFile: Codable, Identifiable, Hashable, Sendable {
     public let fullname: String?
     public let name: String
     public let path: String
-    public let thumbnail: String
+    public let thumbnail: String?
     public let size: Int // Size in kilobytes
     public let width: Int
     public let height: Int
@@ -89,13 +89,13 @@ public struct MediaFile: Codable, Identifiable, Hashable, Sendable {
     public init(
         name: String,
         path: String,
-        thumbnail: String,
-        size: Int,
-        width: Int,
-        height: Int,
-        tnWidth: Int,
-        tnHeight: Int,
-        type: MediaType,
+        thumbnail: String? = nil,
+        size: Int = 0,
+        width: Int = 0,
+        height: Int = 0,
+        tnWidth: Int = 0,
+        tnHeight: Int = 0,
+        type: MediaType = .unknown,
         displayname: String? = nil,
         fullname: String? = nil,
         duration: String? = nil,
@@ -127,7 +127,7 @@ public struct MediaFile: Codable, Identifiable, Hashable, Sendable {
 
         self.name = try container.decode(String.self, forKey: .name)
         self.path = try container.decode(String.self, forKey: .path)
-        self.thumbnail = try container.decode(String.self, forKey: .thumbnail)
+        self.thumbnail = try? container.decode(String.self, forKey: .thumbnail)
         self.size = (try? container.decode(Int.self, forKey: .size)) ?? 0
         self.width = (try? container.decode(Int.self, forKey: .width)) ?? 0
         self.height = (try? container.decode(Int.self, forKey: .height)) ?? 0
@@ -146,22 +146,27 @@ public struct MediaFile: Codable, Identifiable, Hashable, Sendable {
 
     // MARK: - Computed Properties
 
-    /// Absolute URL pointing to the full-resolution asset.
+    /// Absolute URL pointing to the full-resolution asset with percent-encoding.
     public var fullURL: URL? {
         if path.hasPrefix("http://") || path.hasPrefix("https://") {
-            return URL(string: path)
+            let escaped = path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? path
+            return URL(string: escaped)
         }
         let cleanPath = path.hasPrefix("/") ? path : "/\(path)"
-        return URL(string: "https://2ch.org\(cleanPath)")
+        let escapedPath = cleanPath.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? cleanPath
+        return URL(string: "https://2ch.org\(escapedPath)")
     }
 
-    /// Absolute URL pointing to the preview thumbnail (always JPEG).
+    /// Absolute URL pointing to the preview thumbnail (always JPEG) with percent-encoding.
     public var thumbnailURL: URL? {
-        if thumbnail.hasPrefix("http://") || thumbnail.hasPrefix("https://") {
-            return URL(string: thumbnail)
+        guard let thumb = thumbnail, !thumb.isEmpty else { return fullURL }
+        if thumb.hasPrefix("http://") || thumb.hasPrefix("https://") {
+            let escaped = thumb.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? thumb
+            return URL(string: escaped)
         }
-        let cleanPath = thumbnail.hasPrefix("/") ? thumbnail : "/\(thumbnail)"
-        return URL(string: "https://2ch.org\(cleanPath)")
+        let cleanPath = thumb.hasPrefix("/") ? thumb : "/\(thumb)"
+        let escapedPath = cleanPath.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? cleanPath
+        return URL(string: "https://2ch.org\(escapedPath)")
     }
 
     /// Whether this file requires video playback engines.

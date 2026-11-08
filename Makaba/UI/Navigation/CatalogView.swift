@@ -57,7 +57,7 @@ public final class CatalogViewModel: ObservableObject {
 
     private let apiClient: MakabaAPIClient
 
-    public init(board: Board, apiClient: MakabaAPIClient = MakabaAPIClient()) {
+    public init(board: Board, apiClient: MakabaAPIClient = .shared) {
         self.board = board
         self.apiClient = apiClient
     }
@@ -197,7 +197,7 @@ public struct CatalogView: View {
     @State private var isNewThreadSheetPresented: Bool = false
     @State private var loadingSeconds: Int = 0
 
-    public init(board: Board, apiClient: MakabaAPIClient = MakabaAPIClient()) {
+    public init(board: Board, apiClient: MakabaAPIClient = .shared) {
         self._viewModel = StateObject(wrappedValue: CatalogViewModel(board: board, apiClient: apiClient))
     }
 
@@ -255,6 +255,7 @@ public struct CatalogView: View {
             PostingSheet(
                 board: viewModel.board.id,
                 threadNum: nil,
+                boardModel: viewModel.board,
                 apiClient: apiClient,
                 onPostSuccess: { _ in
                     Task {

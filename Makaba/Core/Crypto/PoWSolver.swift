@@ -82,6 +82,11 @@ public final class PoWSolver: Sendable {
 
         // Iterate over strictly half-open interval [0, limit)
         for nonce in 0..<limit {
+            // Cooperative cancellation check every 1024 iterations
+            if (nonce & 1023) == 0 && Task.isCancelled {
+                throw PoWError.cancelled
+            }
+
             let candidate = "\(prefix)\(nonce)\(suffix)"
             guard let data = candidate.data(using: .utf8) else { continue }
 
@@ -95,6 +100,10 @@ public final class PoWSolver: Sendable {
             }
         }
 
+        if Task.isCancelled {
+            throw PoWError.cancelled
+        }
+
         throw PoWError.limitExceeded(limit)
     }
 
@@ -106,52 +115,10 @@ public final class PoWSolver: Sendable {
     ///   - limit: Maximum iterations to probe.
     /// - Returns: A `PoWResult` containing the discovered nonce, matching hex hash, and elapsed time in ms.
     public static func solveAsync(template: String, targetHash: String, limit: Int = 20000) async throws -> PoWResult {
+        try Task.checkCancellation()
         return try await Task.detached(priority: .userInitiated) {
-            // Check cancellation before heavy loop
             try Task.checkCancellation()
-
-            guard limit > 0 else {
-                throw PoWError.limitExceeded(limit)
-            }
-
-            guard template.contains("%d") else {
-                throw PoWError.invalidTemplate
-            }
-
-            let parts = template.components(separatedBy: "%d")
-            guard parts.count == 2 else {
-                throw PoWError.invalidTemplate
-            }
-
-            let prefix = parts[0]
-            let suffix = parts[1]
-
-            let normalizedTarget = targetHash.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            guard normalizedTarget.count == 128, let targetBytes = hexToBytes(normalizedTarget) else {
-                throw PoWError.invalidTargetHash
-            }
-
-            let startTime = CFAbsoluteTimeGetCurrent()
-
-            for nonce in 0..<limit {
-                // Cooperative cancellation check every 1024 iterations
-                if (nonce & 1023) == 0 {
-                    try Task.checkCancellation()
-                }
-
-                let candidate = "\(prefix)\(nonce)\(suffix)"
-                guard let data = candidate.data(using: .utf8) else { continue }
-
-                let digest = SHA512.hash(data: data)
-
-                if digest.elementsEqual(targetBytes) {
-                    let durationMs = (CFAbsoluteTimeGetCurrent() - startTime) * 1000.0
-                    let hexString = digest.map { String(format: "%02x", $0) }.joined()
-                    return PoWResult(nonce: nonce, hash: hexString, durationMs: durationMs)
-                }
-            }
-
-            throw PoWError.limitExceeded(limit)
+            return try solve(template: template, targetHash: targetHash, limit: limit)
         }.value
     }
 

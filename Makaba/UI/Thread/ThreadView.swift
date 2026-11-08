@@ -31,7 +31,7 @@ public final class ThreadViewModel: ObservableObject {
 
     private let apiClient: MakabaAPIClient
 
-    public init(boardId: String, threadNum: Int, apiClient: MakabaAPIClient = MakabaAPIClient()) {
+    public init(boardId: String, threadNum: Int, apiClient: MakabaAPIClient = .shared) {
         self.boardId = boardId
         self.threadNum = threadNum
         self.apiClient = apiClient
@@ -139,7 +139,7 @@ public struct ThreadView: View {
         boardId: String,
         threadNum: Int,
         threadSubject: String? = nil,
-        apiClient: MakabaAPIClient = MakabaAPIClient()
+        apiClient: MakabaAPIClient = .shared
     ) {
         self._viewModel = StateObject(
             wrappedValue: ThreadViewModel(boardId: boardId, threadNum: threadNum, apiClient: apiClient)

@@ -47,19 +47,39 @@ public struct PostingAttachmentItem: Identifiable, Sendable {
 
 @MainActor
 public final class PostingViewModel: ObservableObject {
-    public static let maxFileSizeBytes: Int = 20 * 1024 * 1024 // 20 MB per file
+    public static let defaultMaxFileSizeBytes: Int = 20 * 1024 * 1024 // 20 MB per file
     public static let maxAttachmentsCount: Int = 4
 
     public let board: String
     public let threadNum: Int? // nil or 0 for new thread creation
     public let replyToPostNum: Int?
     public let threadTitle: String?
+    public let boardModel: Board?
+
+    // Dynamic Board Limits
+    public var maxCommentLimit: Int {
+        boardModel?.maxComment ?? 15000
+    }
+    public var maxFileSizeBytes: Int {
+        if let limitKB = boardModel?.maxFilesSize, limitKB > 0 {
+            return limitKB * 1024
+        }
+        return Self.defaultMaxFileSizeBytes
+    }
 
     // Form Fields
-    @Published public var subject: String = ""
-    @Published public var comment: String = ""
-    @Published public var name: String = ""
-    @Published public var email: String = ""
+    @Published public var subject: String = "" {
+        didSet { saveDraft() }
+    }
+    @Published public var comment: String = "" {
+        didSet { saveDraft() }
+    }
+    @Published public var name: String = "" {
+        didSet { saveDraft() }
+    }
+    @Published public var email: String = "" {
+        didSet { saveDraft() }
+    }
     @Published public var isSage: Bool = false
     @Published public var isOPMark: Bool = false
     @Published public var attachments: [PostingAttachmentItem] = []
@@ -70,6 +90,8 @@ public final class PostingViewModel: ObservableObject {
     @Published public var powNonce: String? = nil
     @Published public var captchaType: String? = "emoji_captcha"
     @Published public var isCaptchaSolved: Bool = false
+    @Published public var captchaSolvedDate: Date? = nil
+    @Published public var isCaptchaExpired: Bool = false
 
     // State & UI feedback
     @Published public var isSubmitting: Bool = false
@@ -80,17 +102,23 @@ public final class PostingViewModel: ObservableObject {
     private let apiClient: MakabaAPIClient
     private var cancellables = Set<AnyCancellable>()
 
+    private var draftKey: String {
+        "MakabaDraft_\(board)_\(threadNum ?? 0)"
+    }
+
     public init(
         board: String,
         threadNum: Int? = nil,
         replyToPostNum: Int? = nil,
         threadTitle: String? = nil,
-        apiClient: MakabaAPIClient = MakabaAPIClient()
+        boardModel: Board? = nil,
+        apiClient: MakabaAPIClient = .shared
     ) {
         self.board = board
         self.threadNum = threadNum
         self.replyToPostNum = replyToPostNum
         self.threadTitle = threadTitle
+        self.boardModel = boardModel
         self.apiClient = apiClient
 
         let captchaVM = EmojiCaptchaViewModel(
@@ -100,8 +128,9 @@ public final class PostingViewModel: ObservableObject {
         )
         self.captchaViewModel = captchaVM
 
-        // Pre-fill reply quote if replying to a specific post
-        if let replyNum = replyToPostNum {
+        // Restore draft or pre-fill quote
+        loadDraft()
+        if self.comment.isEmpty, let replyNum = replyToPostNum {
             self.comment = ">>\(replyNum)\n"
         }
 
@@ -127,8 +156,45 @@ public final class PostingViewModel: ObservableObject {
         captchaVM.$isSolved
             .sink { [weak self] solved in
                 self?.isCaptchaSolved = solved
+                if solved {
+                    self?.captchaSolvedDate = Date()
+                    self?.isCaptchaExpired = false
+                }
             }
             .store(in: &cancellables)
+    }
+
+    // MARK: - Draft Management
+
+    public func saveDraft() {
+        guard !comment.isEmpty || !subject.isEmpty else { return }
+        let dict: [String: String] = [
+            "comment": comment,
+            "subject": subject,
+            "name": name,
+            "email": email
+        ]
+        UserDefaults.standard.set(dict, forKey: draftKey)
+    }
+
+    public func loadDraft() {
+        guard let dict = UserDefaults.standard.dictionary(forKey: draftKey) as? [String: String] else { return }
+        if let savedComment = dict["comment"], !savedComment.isEmpty {
+            self.comment = savedComment
+        }
+        if let savedSubject = dict["subject"], !savedSubject.isEmpty {
+            self.subject = savedSubject
+        }
+        if let savedName = dict["name"], !savedName.isEmpty {
+            self.name = savedName
+        }
+        if let savedEmail = dict["email"], !savedEmail.isEmpty {
+            self.email = savedEmail
+        }
+    }
+
+    public func clearDraft() {
+        UserDefaults.standard.removeObject(forKey: draftKey)
     }
 
     /// Whether this sheet is creating a new thread rather than replying.
@@ -140,11 +206,11 @@ public final class PostingViewModel: ObservableObject {
     public var isFormValid: Bool {
         let hasContent = !comment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty
         guard hasContent else { return false }
-        guard comment.count <= 15000 else { return false }
+        guard comment.count <= maxCommentLimit else { return false }
         guard isCaptchaSolved || captchaViewModel.isSolved else { return false }
         guard attachments.count <= Self.maxAttachmentsCount else { return false }
         for att in attachments {
-            if att.data.count > Self.maxFileSizeBytes { return false }
+            if att.data.count > maxFileSizeBytes { return false }
         }
         return true
     }
@@ -155,8 +221,8 @@ public final class PostingViewModel: ObservableObject {
         if trimmed.isEmpty && attachments.isEmpty {
             return "Введите текст сообщения или прикрепите хотя бы один файл."
         }
-        if comment.count > 15000 {
-            return "Длина сообщения превышает лимит (15 000 символов)."
+        if comment.count > maxCommentLimit {
+            return "Длина сообщения превышает лимит (\(maxCommentLimit) символов)."
         }
         if !isCaptchaSolved && !captchaViewModel.isSolved {
             return "Пройдите проверку капчи перед отправкой."
@@ -165,22 +231,22 @@ public final class PostingViewModel: ObservableObject {
             return "Максимальное количество прикрепленных файлов — 4."
         }
         for att in attachments {
-            if att.data.count > Self.maxFileSizeBytes {
-                return "Файл «\(att.fileName)» превышает лимит 20 МБ."
+            if att.data.count > maxFileSizeBytes {
+                return "Файл «\(att.fileName)» превышает лимит \(maxFileSizeBytes / (1024 * 1024)) МБ."
             }
         }
         return nil
     }
 
-    /// Appends a new attachment respecting the maximum 4 files and 20MB per file limits.
+    /// Appends a new attachment respecting the maximum 4 files and file size limits.
     @discardableResult
     public func addAttachment(_ item: PostingAttachmentItem) -> Bool {
         guard attachments.count < Self.maxAttachmentsCount else {
             self.errorMessage = "Максимальное количество прикрепленных файлов — 4."
             return false
         }
-        guard item.data.count <= Self.maxFileSizeBytes else {
-            self.errorMessage = "Файл «\(item.fileName)» превышает лимит 20 МБ (\(item.fileSizeFormatted))."
+        guard item.data.count <= maxFileSizeBytes else {
+            self.errorMessage = "Файл «\(item.fileName)» превышает допустимый лимит (\(item.fileSizeFormatted))."
             return false
         }
         attachments.append(item)
@@ -242,6 +308,9 @@ public final class PostingViewModel: ObservableObject {
             }
 
             self.submissionSuccess = result
+            self.clearDraft()
+            await apiClient.invalidateThreadCache(board: board, threadNum: threadNum ?? (result.targetID ?? 0))
+            await apiClient.invalidateCatalogCache(board: board)
             self.isSubmitting = false
             return result
         } catch let apiError as MakabaAPIError {
@@ -287,7 +356,8 @@ public struct PostingSheet: View {
         threadNum: Int? = nil,
         replyToPostNum: Int? = nil,
         threadTitle: String? = nil,
-        apiClient: MakabaAPIClient = MakabaAPIClient(),
+        boardModel: Board? = nil,
+        apiClient: MakabaAPIClient = .shared,
         onPostSuccess: ((PostingResponse) -> Void)? = nil
     ) {
         self._viewModel = StateObject(
@@ -296,6 +366,7 @@ public struct PostingSheet: View {
                 threadNum: threadNum,
                 replyToPostNum: replyToPostNum,
                 threadTitle: threadTitle,
+                boardModel: boardModel,
                 apiClient: apiClient
             )
         )
@@ -393,6 +464,7 @@ public struct PostingSheet: View {
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
+        .interactiveDismissDisabled(!viewModel.comment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !viewModel.isSubmitting)
     }
 
     // MARK: - Header Info View
@@ -890,6 +962,25 @@ public struct PostingSheet: View {
         }
     }
 
+    private static func sanitizeAndConvertMedia(rawData: Data, isVideo: Bool, rawExtension: String) -> (data: Data, ext: String, mime: String) {
+        if isVideo {
+            let ext = ["mov", "m4v"].contains(rawExtension.lowercased()) ? "mp4" : rawExtension.lowercased()
+            let mime = ext == "webm" ? "video/webm" : "video/mp4"
+            return (rawData, ext, mime)
+        } else {
+            // Preserve animated GIF
+            if rawData.count >= 6, let header = String(data: rawData.prefix(6), encoding: .ascii), header.hasPrefix("GIF") {
+                return (rawData, "gif", "image/gif")
+            }
+            // Strip all EXIF / GPS location data and convert HEIC/PNG/WebP to clean JPEG
+            if let image = UIImage(data: rawData),
+               let sanitizedJPEG = image.jpegData(compressionQuality: 0.88) {
+                return (sanitizedJPEG, "jpg", "image/jpeg")
+            }
+            return (rawData, "jpg", "image/jpeg")
+        }
+    }
+
     private func handlePhotosSelection(_ items: [PhotosPickerItem]) {
         Task.detached(priority: .userInitiated) {
             for item in items {
@@ -904,15 +995,22 @@ public struct PostingSheet: View {
 
                 let uti = item.supportedContentTypes.first
                 let isVideo = uti?.conforms(to: .movie) == true || uti?.conforms(to: .video) == true
-                let ext = uti?.preferredFilenameExtension ?? (isVideo ? "mp4" : "jpg")
-                let mime = uti?.preferredMIMEType ?? (isVideo ? "video/mp4" : "image/jpeg")
+                let rawExt = uti?.preferredFilenameExtension ?? (isVideo ? "mp4" : "jpg")
+
+                // Sanitize media, convert HEIC to JPEG, strip GPS/EXIF
+                let (sanitizedData, ext, mime) = Self.sanitizeAndConvertMedia(
+                    rawData: data,
+                    isVideo: isVideo,
+                    rawExtension: rawExt
+                )
+
                 let count = await MainActor.run { viewModel.attachments.count }
                 let fileName = "photo_\(Int(Date().timeIntervalSince1970))_\(count + 1).\(ext)"
 
                 let attachment = PostingAttachmentItem(
                     fileName: fileName,
                     mimeType: mime,
-                    data: data,
+                    data: sanitizedData,
                     isVideo: isVideo
                 )
 
@@ -949,16 +1047,22 @@ public struct PostingSheet: View {
 
                     guard let data = fileData else { continue }
 
-                    let ext = url.pathExtension.lowercased()
-                    let isVideo = ["mp4", "webm", "mov", "m4v"].contains(ext)
-                    let utType = UTType(filenameExtension: ext)
-                    let mime = utType?.preferredMIMEType ?? (isVideo ? "video/mp4" : "application/octet-stream")
-                    let fileName = url.lastPathComponent
+                    let rawExt = url.pathExtension.lowercased()
+                    let isVideo = ["mp4", "webm", "mov", "m4v"].contains(rawExt)
+
+                    // Sanitize media, convert HEIC to JPEG, strip GPS/EXIF
+                    let (sanitizedData, ext, mime) = Self.sanitizeAndConvertMedia(
+                        rawData: data,
+                        isVideo: isVideo,
+                        rawExtension: rawExt
+                    )
+
+                    let fileName = url.deletingPathExtension().lastPathComponent + ".\(ext)"
 
                     let attachment = PostingAttachmentItem(
                         fileName: fileName,
                         mimeType: mime,
-                        data: data,
+                        data: sanitizedData,
                         isVideo: isVideo
                     )
 

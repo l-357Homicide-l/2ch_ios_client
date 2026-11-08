@@ -41,6 +41,14 @@ public final class MakabaHTMLParser: Sendable {
     /// Whitelisted URL schemes permitted for active clickable links.
     private static let whitelistedSchemes: Set<String> = ["2ch-quote", "http", "https"]
 
+    private static let quoteRegex: NSRegularExpression? = {
+        try? NSRegularExpression(pattern: #"(?:data-num=["'](\d+)["']|&gt;&gt;(\d+)|href=["'][^"']*#(\d+)["'])"#)
+    }()
+
+    private static let anchorRegex: NSRegularExpression? = {
+        try? NSRegularExpression(pattern: #"#(\d+)$"#)
+    }()
+
     // MARK: - Internal Styling State
 
     private struct StyleState: Sendable {
@@ -84,10 +92,12 @@ public final class MakabaHTMLParser: Sendable {
                 segment.foregroundColor = greentextColor
             }
 
-            // 2. Spoiler styling
+            // 2. Spoiler styling: always open/visible by default per user specification,
+            // with subtle highlighted background and dotted accent underline marking it clearly as a spoiler.
             if currentStyle.isSpoiler {
                 segment.makabaSpoiler = true
-                segment.backgroundColor = Color.secondary.opacity(0.25)
+                segment.backgroundColor = Color.secondary.opacity(0.18)
+                segment.underlineStyle = Text.LineStyle(pattern: .dot, color: Color.orange.opacity(0.85))
             }
 
             // 3. Typographic traits
@@ -189,20 +199,16 @@ public final class MakabaHTMLParser: Sendable {
     /// Extracts all target quote numbers (e.g., `>>123456`) referenced in the HTML.
     public static func extractQuoteNumbers(html: String) -> [Int] {
         var numbers: [Int] = []
-        // Milestone 2 Remediation: Match data-num="123", >>123, or href="...#123".
-        // Prevents HTML entities like &#39; and color codes #123456 from falsely matching.
-        let pattern = #"(?:data-num=["'](\d+)["']|&gt;&gt;(\d+)|href=["'][^"']*#(\d+)["'])"#
-        if let regex = try? NSRegularExpression(pattern: pattern) {
-            let nsStr = html as NSString
-            let matches = regex.matches(in: html, range: NSRange(location: 0, length: nsStr.length))
-            for match in matches {
-                for r in 1...3 {
-                    let range = match.range(at: r)
-                    if range.location != NSNotFound {
-                        let numStr = nsStr.substring(with: range)
-                        if let n = Int(numStr), !numbers.contains(n) {
-                            numbers.append(n)
-                        }
+        guard let regex = quoteRegex else { return numbers }
+        let nsStr = html as NSString
+        let matches = regex.matches(in: html, range: NSRange(location: 0, length: nsStr.length))
+        for match in matches {
+            for r in 1...3 {
+                let range = match.range(at: r)
+                if range.location != NSNotFound {
+                    let numStr = nsStr.substring(with: range)
+                    if let n = Int(numStr), !numbers.contains(n) {
+                        numbers.append(n)
                     }
                 }
             }
@@ -358,8 +364,7 @@ public final class MakabaHTMLParser: Sendable {
     }
 
     private static func extractAnchorNumber(from href: String) -> Int? {
-        let pattern = #"#(\d+)$"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        guard let regex = anchorRegex else { return nil }
         let nsHref = href as NSString
         guard let match = regex.firstMatch(in: href, range: NSRange(location: 0, length: nsHref.length)) else {
             return nil

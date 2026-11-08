@@ -78,6 +78,40 @@ public struct MultipartFormData: Sendable {
         return result
     }
 
+    /// Streams the multipart payload directly to a temporary file URL, avoiding peak RAM duplication.
+    public func writeToTempFile() throws -> URL {
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("makaba_upload_\(UUID().uuidString).tmp")
+        FileManager.default.createFile(atPath: tempURL.path, contents: nil)
+        guard let handle = try? FileHandle(forWritingTo: tempURL) else {
+            let data = build()
+            try data.write(to: tempURL)
+            return tempURL
+        }
+        defer { try? handle.close() }
+
+        for part in parts {
+            if let boundaryData = "--\(boundary)\(crlf)".data(using: .utf8) {
+                try handle.write(contentsOf: boundaryData)
+            }
+            for (headerKey, headerVal) in part.headers {
+                if let headerData = "\(headerKey): \(headerVal)\(crlf)".data(using: .utf8) {
+                    try handle.write(contentsOf: headerData)
+                }
+            }
+            if let crlfData = crlf.data(using: .utf8) {
+                try handle.write(contentsOf: crlfData)
+            }
+            try handle.write(contentsOf: part.body)
+            if let crlfData = crlf.data(using: .utf8) {
+                try handle.write(contentsOf: crlfData)
+            }
+        }
+        if let closeData = "--\(boundary)--\(crlf)".data(using: .utf8) {
+            try handle.write(contentsOf: closeData)
+        }
+        return tempURL
+    }
+
     /// Returns estimated byte size of the serialized payload.
     public var totalSize: Int {
         return build().count

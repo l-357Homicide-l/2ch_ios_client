@@ -234,6 +234,8 @@ public struct MediaItemView: View {
     public let onSingleTap: () -> Void
     public let onDismissGesture: () -> Void
 
+    @State private var isNSFWRevealed: Bool
+
     public init(
         file: MediaFile,
         isActive: Bool = true,
@@ -244,37 +246,75 @@ public struct MediaItemView: View {
         self.isActive = isActive
         self.onSingleTap = onSingleTap
         self.onDismissGesture = onDismissGesture
+        self._isNSFWRevealed = State(initialValue: file.nsfw != 1)
     }
 
     public var body: some View {
-        Group {
-            if file.isVideo {
-                if let fullURL = file.fullURL {
-                    WebMPlayerView(
-                        url: fullURL,
-                        autoPlay: true,
-                        isLooping: true,
-                        thumbnailURL: file.thumbnailURL,
-                        title: file.displayname ?? file.name,
-                        bottomInset: 72,
-                        isActive: isActive,
-                        onSingleTap: onSingleTap
-                    )
+        ZStack {
+            Group {
+                if file.isVideo {
+                    if let fullURL = file.fullURL {
+                        WebMPlayerView(
+                            url: fullURL,
+                            autoPlay: true,
+                            isLooping: true,
+                            thumbnailURL: file.thumbnailURL,
+                            title: file.displayname ?? file.name,
+                            bottomInset: 72,
+                            isActive: isActive && isNSFWRevealed,
+                            onSingleTap: onSingleTap
+                        )
+                    } else {
+                        VStack(spacing: 12) {
+                            Image(systemName: "video.slash")
+                                .font(.system(size: 44))
+                                .foregroundColor(.orange)
+                            Text("Неверный URL видеофайла")
+                                .foregroundColor(.white)
+                        }
+                    }
                 } else {
-                    VStack(spacing: 12) {
-                        Image(systemName: "video.slash")
-                            .font(.system(size: 44))
-                            .foregroundColor(.orange)
-                        Text("Неверный URL видеофайла")
-                            .foregroundColor(.white)
+                    ZoomableImageView(
+                        file: file,
+                        onSingleTap: onSingleTap,
+                        onDismissGesture: onDismissGesture
+                    )
+                }
+            }
+            .blur(radius: (file.nsfw == 1 && !isNSFWRevealed) ? 28 : 0)
+
+            // Fullscreen NSFW Shield
+            if file.nsfw == 1 && !isNSFWRevealed {
+                Color.black.opacity(0.65)
+                    .ignoresSafeArea()
+
+                VStack(spacing: 14) {
+                    Image(systemName: "eye.slash.fill")
+                        .font(.system(size: 44))
+                        .foregroundColor(.orange)
+
+                    Text("Деликатный контент (18+)")
+                        .font(.headline)
+                        .foregroundColor(.white)
+
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            isNSFWRevealed = true
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "eye.fill")
+                            Text("Показать медиафайл")
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .background(Color.orange)
+                        .foregroundColor(.white)
+                        .clipShape(Capsule())
                     }
                 }
-            } else {
-                ZoomableImageView(
-                    file: file,
-                    onSingleTap: onSingleTap,
-                    onDismissGesture: onDismissGesture
-                )
+                .padding(24)
             }
         }
     }

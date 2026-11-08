@@ -78,6 +78,17 @@ private actor ResponseCache {
         boardPageCache[key] = (data, Date())
     }
 
+    func invalidateCatalog(board: String) {
+        catalogCache.removeValue(forKey: board)
+        // Also remove page 0 cache
+        boardPageCache.removeValue(forKey: "\(board)/p0")
+    }
+
+    func invalidateThread(board: String, threadNum: Int) {
+        let key = "\(board)/\(threadNum)"
+        threadCache.removeValue(forKey: key)
+    }
+
     func clearAll() {
         catalogCache.removeAll()
         threadCache.removeAll()
@@ -86,7 +97,10 @@ private actor ResponseCache {
 }
 
 /// Actor or class implementing full async/await networking for the Makaba imageboard engine.
-public final class MakabaAPIClient: Sendable {
+public final class MakabaAPIClient: ObservableObject, Sendable {
+    /// Shared singleton instance guaranteeing unified URLSession and isolated cache across the app.
+    public static let shared = MakabaAPIClient()
+
     public let baseURL: URL
     public let session: URLSession
     public let passcodeToken: String?
@@ -322,9 +336,26 @@ public final class MakabaAPIClient: Sendable {
 
         var req = MakabaEndpoint.posting.request(baseURL: baseURL, passcodeToken: passcodeToken)
         req.setValue(multipart.contentType, forHTTPHeaderField: "Content-Type")
-        req.httpBody = multipart.build()
 
-        let (data, response) = try await execute(request: req)
+        let tempURL = try? multipart.writeToTempFile()
+        defer {
+            if let tempURL = tempURL {
+                try? FileManager.default.removeItem(at: tempURL)
+            }
+        }
+
+        let (data, response): (Data, URLResponse)
+        if let tempURL = tempURL {
+            do {
+                (data, response) = try await session.upload(for: req, fromFile: tempURL)
+            } catch {
+                throw MakabaAPIError.networkError(error.localizedDescription)
+            }
+        } else {
+            req.httpBody = multipart.build()
+            (data, response) = try await execute(request: req)
+        }
+
         try validateHTTPStatus(response, data: data)
 
         do {
@@ -332,12 +363,32 @@ public final class MakabaAPIClient: Sendable {
             if !postingResult.isSuccess, let err = postingResult.error {
                 throw MakabaAPIError.serverError(code: err.code, message: err.message)
             }
+            // Invalidate cache immediately on successful post
+            await invalidateThreadCache(board: payload.board, threadNum: payload.thread)
+            await invalidateCatalogCache(board: payload.board)
             return postingResult
         } catch let apiErr as MakabaAPIError {
             throw apiErr
         } catch {
             throw MakabaAPIError.decodingError(error.localizedDescription)
         }
+    }
+
+    // MARK: - Cache Invalidation API
+
+    /// Invalidates in-memory and disk cache for a specific board catalog.
+    public func invalidateCatalogCache(board: String) async {
+        await ResponseCache.shared.invalidateCatalog(board: board)
+    }
+
+    /// Invalidates in-memory and disk cache for a specific thread.
+    public func invalidateThreadCache(board: String, threadNum: Int) async {
+        await ResponseCache.shared.invalidateThread(board: board, threadNum: threadNum)
+    }
+
+    /// Clears all cached board and thread responses.
+    public func clearAllCache() async {
+        await ResponseCache.shared.clearAll()
     }
 
     /// Upvotes a post on boards where likes are enabled.

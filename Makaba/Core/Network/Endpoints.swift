@@ -98,11 +98,14 @@ public enum MakabaEndpoint: Sendable {
         }
     }
 
-    /// Resolves the full URL using the given base host.
+    /// Resolves the full URL using the given base host with robust percent-encoding for spaces and Cyrillic paths.
     public func url(baseURL: URL = defaultBaseURL) -> URL {
         let baseStr = baseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let cleanPath = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        let fullPathString = cleanPath.isEmpty ? baseStr : "\(baseStr)/\(cleanPath)"
+
+        // Safely percent-encode path segments containing spaces or non-ASCII characters
+        let encodedPath = cleanPath.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? cleanPath
+        let fullPathString = encodedPath.isEmpty ? baseStr : "\(baseStr)/\(encodedPath)"
 
         var components = URLComponents(string: fullPathString)
         if let queryItems = queryItems, !queryItems.isEmpty {

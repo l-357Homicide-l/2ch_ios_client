@@ -80,7 +80,7 @@ public final class EmojiCaptchaViewModel: ObservableObject {
     public init(
         board: String,
         thread: Int = 0,
-        apiClient: MakabaAPIClient = MakabaAPIClient()
+        apiClient: MakabaAPIClient = .shared
     ) {
         self.board = board
         self.thread = thread
@@ -325,7 +325,7 @@ public struct EmojiCaptchaView: View {
     public init(
         board: String,
         thread: Int = 0,
-        apiClient: MakabaAPIClient = MakabaAPIClient(),
+        apiClient: MakabaAPIClient = .shared,
         verifiedToken: Binding<String?>? = nil,
         powNonce: Binding<String?>? = nil,
         captchaType: Binding<String?>? = nil,

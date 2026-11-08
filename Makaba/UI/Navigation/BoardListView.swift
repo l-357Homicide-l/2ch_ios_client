@@ -60,7 +60,7 @@ public final class BoardListViewModel: ObservableObject {
 
     private let apiClient: MakabaAPIClient
 
-    public init(apiClient: MakabaAPIClient = MakabaAPIClient()) {
+    public init(apiClient: MakabaAPIClient = .shared) {
         self.apiClient = apiClient
     }
 
@@ -119,7 +119,7 @@ public struct BoardListView: View {
 
     public init(
         selectedBoard: Binding<Board?> = .constant(nil),
-        apiClient: MakabaAPIClient = MakabaAPIClient()
+        apiClient: MakabaAPIClient = .shared
     ) {
         self._selectedBoard = selectedBoard
         self._viewModel = StateObject(wrappedValue: BoardListViewModel(apiClient: apiClient))

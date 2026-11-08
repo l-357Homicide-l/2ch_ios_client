@@ -44,8 +44,8 @@ public final class DomainConfigurationService: ObservableObject, @unchecked Send
     private let passcodeKey = "makaba_passcode_token"
     private let lock = NSLock()
     private var _domain: String
-    private var _customMirrors: [String]
-    private var _passcodeToken: String?
+    private var internalCustomMirrors: [String]
+    private var internalPasscodeToken: String?
 
     @Published public private(set) var activeDomain: String
     @Published public private(set) var customMirrors: [String]
@@ -56,9 +56,9 @@ public final class DomainConfigurationService: ObservableObject, @unchecked Send
         let storedCustom = UserDefaults.standard.stringArray(forKey: customMirrorsKey) ?? []
         let storedPasscode = UserDefaults.standard.string(forKey: passcodeKey)
 
-        self._customMirrors = storedCustom
+        self.internalCustomMirrors = storedCustom
         self.customMirrors = storedCustom
-        self._passcodeToken = storedPasscode
+        self.internalPasscodeToken = storedPasscode
         self.passcodeToken = storedPasscode
 
         let allValid = Self.verifiedMirrors + storedCustom + Self.fallbackMirrors
@@ -71,7 +71,7 @@ public final class DomainConfigurationService: ObservableObject, @unchecked Send
     public var allMirrors: [String] {
         lock.lock()
         defer { lock.unlock() }
-        var list = Self.verifiedMirrors + _customMirrors
+        var list = Self.verifiedMirrors + internalCustomMirrors
         for fallback in Self.fallbackMirrors {
             if !list.contains(fallback) {
                 list.append(fallback)
@@ -85,7 +85,7 @@ public final class DomainConfigurationService: ObservableObject, @unchecked Send
     public var autoFailoverMirrors: [String] {
         lock.lock()
         defer { lock.unlock() }
-        return Self.verifiedMirrors + _customMirrors
+        return Self.verifiedMirrors + internalCustomMirrors
     }
 
     /// The base URL currently selected for network operations.
@@ -142,11 +142,11 @@ public final class DomainConfigurationService: ObservableObject, @unchecked Send
         }
 
         lock.lock()
-        if !_customMirrors.contains(normalized) && !Self.verifiedMirrors.contains(normalized) && !Self.fallbackMirrors.contains(normalized) {
-            _customMirrors.append(normalized)
-            UserDefaults.standard.set(_customMirrors, forKey: customMirrorsKey)
+        if !internalCustomMirrors.contains(normalized) && !Self.verifiedMirrors.contains(normalized) && !Self.fallbackMirrors.contains(normalized) {
+            internalCustomMirrors.append(normalized)
+            UserDefaults.standard.set(internalCustomMirrors, forKey: customMirrorsKey)
         }
-        let updated = _customMirrors
+        let updated = internalCustomMirrors
         lock.unlock()
 
         DispatchQueue.main.async { [weak self] in
@@ -158,9 +158,9 @@ public final class DomainConfigurationService: ObservableObject, @unchecked Send
     /// Removes a custom mirror.
     public func removeCustomMirror(_ mirror: String) {
         lock.lock()
-        _customMirrors.removeAll { $0 == mirror }
-        UserDefaults.standard.set(_customMirrors, forKey: customMirrorsKey)
-        let updated = _customMirrors
+        internalCustomMirrors.removeAll { $0 == mirror }
+        UserDefaults.standard.set(internalCustomMirrors, forKey: customMirrorsKey)
+        let updated = internalCustomMirrors
         let isCurrent = (_domain == mirror)
         lock.unlock()
 
@@ -178,7 +178,7 @@ public final class DomainConfigurationService: ObservableObject, @unchecked Send
         let finalToken = (clean?.isEmpty ?? true) ? nil : clean
 
         lock.lock()
-        _passcodeToken = finalToken
+        internalPasscodeToken = finalToken
         if let t = finalToken {
             UserDefaults.standard.set(t, forKey: passcodeKey)
         } else {

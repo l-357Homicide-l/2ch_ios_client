@@ -34,6 +34,57 @@ public enum MakabaAPIError: Error, LocalizedError, Sendable {
     }
 }
 
+/// Global shared in-memory response cache to ensure instantaneous board navigation and thread reopening.
+private actor ResponseCache {
+    static let shared = ResponseCache()
+    private var catalogCache: [String: (data: CatalogResponse, timestamp: Date)] = [:]
+    private var threadCache: [String: (data: ThreadResponse, timestamp: Date)] = [:]
+    private var boardPageCache: [String: (data: ThreadResponse, timestamp: Date)] = [:]
+
+    func getCatalog(board: String, maxAge: TimeInterval = 180) -> CatalogResponse? {
+        if let entry = catalogCache[board], Date().timeIntervalSince(entry.timestamp) < maxAge {
+            return entry.data
+        }
+        return nil
+    }
+
+    func setCatalog(board: String, data: CatalogResponse) {
+        catalogCache[board] = (data, Date())
+    }
+
+    func getThread(board: String, threadNum: Int, maxAge: TimeInterval = 120) -> ThreadResponse? {
+        let key = "\(board)/\(threadNum)"
+        if let entry = threadCache[key], Date().timeIntervalSince(entry.timestamp) < maxAge {
+            return entry.data
+        }
+        return nil
+    }
+
+    func setThread(board: String, threadNum: Int, data: ThreadResponse) {
+        let key = "\(board)/\(threadNum)"
+        threadCache[key] = (data, Date())
+    }
+
+    func getBoardPage(board: String, page: Int, maxAge: TimeInterval = 180) -> ThreadResponse? {
+        let key = "\(board)/p\(page)"
+        if let entry = boardPageCache[key], Date().timeIntervalSince(entry.timestamp) < maxAge {
+            return entry.data
+        }
+        return nil
+    }
+
+    func setBoardPage(board: String, page: Int, data: ThreadResponse) {
+        let key = "\(board)/p\(page)"
+        boardPageCache[key] = (data, Date())
+    }
+
+    func clearAll() {
+        catalogCache.removeAll()
+        threadCache.removeAll()
+        boardPageCache.removeAll()
+    }
+}
+
 /// Actor or class implementing full async/await networking for the Makaba imageboard engine.
 public final class MakabaAPIClient: Sendable {
     public let baseURL: URL
@@ -50,8 +101,11 @@ public final class MakabaAPIClient: Sendable {
             self.session = customSession
         } else {
             let config = URLSessionConfiguration.default
-            config.timeoutIntervalForRequest = 30.0
-            config.timeoutIntervalForResource = 60.0
+            config.timeoutIntervalForRequest = 25.0
+            config.timeoutIntervalForResource = 45.0
+            let memoryCapacity = 50 * 1024 * 1024 // 50 MB RAM
+            let diskCapacity = 200 * 1024 * 1024 // 200 MB Disk
+            config.urlCache = URLCache(memoryCapacity: memoryCapacity, diskCapacity: diskCapacity, diskPath: "makaba_network_cache")
             config.requestCachePolicy = .useProtocolCachePolicy
             self.session = URLSession(configuration: config)
         }
@@ -93,14 +147,19 @@ public final class MakabaAPIClient: Sendable {
         return try await fetchBoardCategories()
     }
 
-    /// Fetches the catalog containing all active threads for a board.
-    public func fetchCatalog(board: String) async throws -> CatalogResponse {
+    /// Fetches the catalog containing all active threads for a board, with high-performance response cache.
+    public func fetchCatalog(board: String, ignoreCache: Bool = false) async throws -> CatalogResponse {
+        if !ignoreCache, let cached = await ResponseCache.shared.getCatalog(board: board) {
+            return cached
+        }
         let req = MakabaEndpoint.catalog(board: board).request(baseURL: baseURL, passcodeToken: passcodeToken)
         let (data, response) = try await execute(request: req)
         try validateHTTPStatus(response, data: data)
 
         do {
-            return try JSONDecoder().decode(CatalogResponse.self, from: data)
+            let decoded = try JSONDecoder().decode(CatalogResponse.self, from: data)
+            await ResponseCache.shared.setCatalog(board: board, data: decoded)
+            return decoded
         } catch {
             throw MakabaAPIError.decodingError(error.localizedDescription)
         }
@@ -119,27 +178,37 @@ public final class MakabaAPIClient: Sendable {
         }
     }
 
-    /// Fetches a specific board page (index.json for page 0, 1.json, etc.).
-    public func fetchBoardPage(board: String, page: Int = 0) async throws -> ThreadResponse {
+    /// Fetches a specific board page (index.json for page 0, 1.json, etc.) with response cache.
+    public func fetchBoardPage(board: String, page: Int = 0, ignoreCache: Bool = false) async throws -> ThreadResponse {
+        if !ignoreCache, let cached = await ResponseCache.shared.getBoardPage(board: board, page: page) {
+            return cached
+        }
         let req = MakabaEndpoint.boardPage(board: board, page: page).request(baseURL: baseURL, passcodeToken: passcodeToken)
         let (data, response) = try await execute(request: req)
         try validateHTTPStatus(response, data: data)
 
         do {
-            return try JSONDecoder().decode(ThreadResponse.self, from: data)
+            let decoded = try JSONDecoder().decode(ThreadResponse.self, from: data)
+            await ResponseCache.shared.setBoardPage(board: board, page: page, data: decoded)
+            return decoded
         } catch {
             throw MakabaAPIError.decodingError(error.localizedDescription)
         }
     }
 
-    /// Fetches all posts in a thread given the board ID and thread root number.
-    public func fetchThread(board: String, threadNum: Int) async throws -> ThreadResponse {
+    /// Fetches all posts in a thread given the board ID and thread root number with response cache.
+    public func fetchThread(board: String, threadNum: Int, ignoreCache: Bool = false) async throws -> ThreadResponse {
+        if !ignoreCache, let cached = await ResponseCache.shared.getThread(board: board, threadNum: threadNum) {
+            return cached
+        }
         let req = MakabaEndpoint.thread(board: board, threadNum: threadNum).request(baseURL: baseURL, passcodeToken: passcodeToken)
         let (data, response) = try await execute(request: req)
         try validateHTTPStatus(response, data: data)
 
         do {
-            return try JSONDecoder().decode(ThreadResponse.self, from: data)
+            let decoded = try JSONDecoder().decode(ThreadResponse.self, from: data)
+            await ResponseCache.shared.setThread(board: board, threadNum: threadNum, data: decoded)
+            return decoded
         } catch {
             throw MakabaAPIError.decodingError(error.localizedDescription)
         }

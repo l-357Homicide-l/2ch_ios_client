@@ -38,7 +38,7 @@ public final class ThreadViewModel: ObservableObject {
     }
 
     /// Fetches all posts in the thread and calculates the reply graph.
-    public func loadThread() async {
+    public func loadThread(forceRefresh: Bool = false) async {
         if posts.isEmpty {
             isLoading = true
         } else {
@@ -47,7 +47,7 @@ public final class ThreadViewModel: ObservableObject {
         errorMessage = nil
 
         do {
-            let response = try await apiClient.fetchThread(board: boardId, threadNum: threadNum)
+            let response = try await apiClient.fetchThread(board: boardId, threadNum: threadNum, ignoreCache: forceRefresh)
             self.threadResponse = response
             self.posts = response.posts
             self.buildReplyGraph()
@@ -173,7 +173,7 @@ public struct ThreadView: View {
                     // Manual Refresh Button
                     Button {
                         Task {
-                            await viewModel.loadThread()
+                            await viewModel.loadThread(forceRefresh: true)
                         }
                     } label: {
                         if viewModel.isRefreshing {
@@ -193,7 +193,7 @@ public struct ThreadView: View {
                 }
             }
             .refreshable {
-                await viewModel.loadThread()
+                await viewModel.loadThread(forceRefresh: true)
             }
             .task {
                 if viewModel.posts.isEmpty {

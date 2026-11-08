@@ -62,8 +62,10 @@ public final class CatalogViewModel: ObservableObject {
         self.apiClient = apiClient
     }
 
-    public func loadCatalog() async {
-        isLoading = true
+    public func loadCatalog(forceRefresh: Bool = false) async {
+        if threads.isEmpty {
+            isLoading = true
+        }
         errorMessage = nil
 
         if board.isDefunct {
@@ -73,12 +75,12 @@ public final class CatalogViewModel: ObservableObject {
         }
 
         do {
-            let response = try await apiClient.fetchCatalog(board: board.id)
+            let response = try await apiClient.fetchCatalog(board: board.id, ignoreCache: forceRefresh)
             self.threads = response.threads
             self.isLoading = false
         } catch {
             // Secondary fallback 1: index.json (Page 0) for boards without catalog.json
-            if let pageResponse = try? await apiClient.fetchBoardPage(board: board.id, page: 0) {
+            if let pageResponse = try? await apiClient.fetchBoardPage(board: board.id, page: 0, ignoreCache: forceRefresh) {
                 let convertedThreads = pageResponse.threads.compactMap { threadContainer -> CatalogThreadItem? in
                     guard let opPost = threadContainer.posts.first else { return nil }
                     return CatalogThreadItem(
@@ -193,6 +195,7 @@ public struct CatalogView: View {
     @EnvironmentObject private var apiClient: MakabaAPIClient
     @StateObject private var viewModel: CatalogViewModel
     @State private var isNewThreadSheetPresented: Bool = false
+    @State private var loadingSeconds: Int = 0
 
     public init(board: Board, apiClient: MakabaAPIClient = MakabaAPIClient()) {
         self._viewModel = StateObject(wrappedValue: CatalogViewModel(board: board, apiClient: apiClient))
@@ -261,7 +264,7 @@ public struct CatalogView: View {
             )
         }
         .refreshable {
-            await viewModel.loadCatalog()
+            await viewModel.loadCatalog(forceRefresh: true)
         }
         .task {
             if viewModel.threads.isEmpty {
@@ -317,14 +320,24 @@ public struct CatalogView: View {
     // MARK: - State Views
 
     private var loadingView: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 14) {
             ProgressView()
                 .scaleEffect(1.2)
-            Text("Загрузка каталога /\(viewModel.board.id)/...")
+                .padding(.bottom, 2)
+            Text("Загрузка каталога /\(viewModel.board.id)/")
+                .font(.headline)
+            Text(loadingSeconds < 2 ? "Подключение к серверам двача..." : "Сервер двача передает каталог тредов...")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .task {
+            loadingSeconds = 0
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                loadingSeconds += 1
+            }
+        }
     }
 
     private func errorView(_ message: String) -> some View {

@@ -174,11 +174,6 @@ public final class MakabaAPIClient: ObservableObject, Sendable {
 
     /// Fetches all active public boards on 2ch.org.
     public func fetchAllBoards() async throws -> [Board] {
-        return try await fetchBoards()
-    }
-
-    /// Fetches all active public boards on 2ch.org.
-    public func fetchAllBoards() async throws -> [Board] {
         let req = MakabaEndpoint.boards.request(baseURL: baseURL, passcodeToken: passcodeToken)
         let (data, response) = try await execute(request: req)
         try validateHTTPStatus(response, data: data)

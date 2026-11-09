@@ -728,7 +728,7 @@ final class ModelDecodingTests: XCTestCase {
         }
         """.data(using: .utf8)!
 
-        let thread = try decoder.decode(CatalogThread.self, from: json)
+        let thread = try decoder.decode(CatalogThreadItem.self, from: json)
         XCTAssertEqual(thread.num, 338026248)
         XCTAssertEqual(thread.score, 47.94444444444444)
     }

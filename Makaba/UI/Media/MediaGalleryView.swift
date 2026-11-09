@@ -76,7 +76,9 @@ public struct MediaGalleryView: View {
             AttachVerticalDismissGesture(
                 isEnabled: !isCurrentItemZoomed,
                 onVerticalPan: { dy in
-                    dismissOffset = dy
+                    if abs(dy) > 10 {
+                        dismissOffset = dy
+                    }
                 },
                 onEnded: { translationY, velocityY in
                     if abs(translationY) > 100 || abs(velocityY) > 400 {
@@ -492,12 +494,18 @@ public struct ZoomableImageView: View {
                                     .offset(offset),
                                 proxy: proxy
                             )
-                            .onTapGesture(count: 2) {
-                                handleDoubleTap()
-                            }
-                            .onTapGesture(count: 1) {
-                                onSingleTap()
-                            }
+                            .gesture(
+                                TapGesture(count: 2)
+                                    .onEnded {
+                                        handleDoubleTap()
+                                    }
+                            )
+                            .simultaneousGesture(
+                                TapGesture(count: 1)
+                                    .onEnded {
+                                        onSingleTap()
+                                    }
+                            )
                         case .failure:
                             VStack(spacing: 8) {
                                 Image(systemName: "exclamationmark.triangle")
@@ -515,6 +523,7 @@ public struct ZoomableImageView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
         }
     }
 
@@ -740,18 +749,21 @@ final class DirectionalPanGestureRecognizer: UIPanGestureRecognizer, UIGestureRe
               let view = pan.view else { return false }
         let velocity = pan.velocity(in: view)
         // STRICT DIRECTIONAL FILTER:
-        // Must be predominantly vertical: vertical velocity must exceed horizontal velocity by at least 15%
-        // and velocity must be at least 25 pt/s to avoid accidental jitter.
-        // If horizontal velocity is greater or equal, this recognizer returns false immediately,
-        // leaving the horizontal swipe 100% unimpeded for UIPageViewController / TabView.
-        return abs(velocity.y) > (abs(velocity.x) * 1.15) && abs(velocity.y) > 25
+        // Deliberate vertical swipe only: vertical velocity must dominate horizontal velocity by at least 2.5x
+        // and velocity must exceed 200 pt/s. This ensures natural curved thumb swipes across the screen
+        // NEVER accidentally trigger vertical dismiss and are 100% reserved for horizontal paging.
+        return abs(velocity.y) > (abs(velocity.x) * 2.5) && abs(velocity.y) > 200
     }
 
     func gestureRecognizer(
         _ gestureRecognizer: UIGestureRecognizer,
         shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
     ) -> Bool {
-        // Allow simultaneous recognition with child taps/gestures
+        // NEVER recognize simultaneously with another pan/scroll gesture (such as UIPageViewController horizontal paging)!
+        // This guarantees horizontal paging never suffers from concurrent vertical offset mutations.
+        if otherGestureRecognizer is UIPanGestureRecognizer {
+            return false
+        }
         return true
     }
 }

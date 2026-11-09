@@ -130,7 +130,13 @@ public struct Post: Codable, Identifiable, Hashable, Sendable {
         self.lasthit = try? container.decode(Int.self, forKey: .lasthit)
         self.likes = try? container.decode(Int.self, forKey: .likes)
         self.dislikes = try? container.decode(Int.self, forKey: .dislikes)
-        self.files = (try? container.decode([MediaFile].self, forKey: .files)) ?? []
+        
+        // Lossy decoding: resilient element-by-element parsing prevents a single malformed file from discarding all attachments
+        if let lossyFiles = try? container.decode([LossyMediaFile].self, forKey: .files) {
+            self.files = lossyFiles.compactMap(\.value)
+        } else {
+            self.files = (try? container.decode([MediaFile].self, forKey: .files)) ?? []
+        }
 
         // Flexible decoding for `icon` which may be an Int or String or missing
         if let iconInt = try? container.decode(Int.self, forKey: .icon) {
@@ -179,5 +185,15 @@ public struct Post: Codable, Identifiable, Hashable, Sendable {
     /// Extract target post IDs referenced by this post's HTML comment (e.g., `>>338026307`).
     public var referencedPostNumbers: [Int] {
         return MakabaHTMLParser.extractQuoteNumbers(html: comment)
+    }
+}
+
+/// Resilient decoder wrapper that tolerates single malformed attachment payloads.
+public struct LossyMediaFile: Decodable, Sendable {
+    public let value: MediaFile?
+
+    public init(from decoder: Decoder) throws {
+        let container = try? decoder.singleValueContainer()
+        self.value = try? container?.decode(MediaFile.self)
     }
 }

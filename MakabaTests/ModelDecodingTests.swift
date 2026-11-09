@@ -716,4 +716,34 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(result.error?.code, -5)
         XCTAssertEqual(result.errorMessage, "Капча невалидна.")
     }
+
+    // MARK: - 8. Floating-point Score Decoding Tests
+
+    func test_catalogThread_decoding_withFloatingPointScore() throws {
+        let json = """
+        {
+            "num": "338026248",
+            "comment": "Тред с дробным рейтингом",
+            "score": 47.94444444444444
+        }
+        """.data(using: .utf8)!
+
+        let thread = try decoder.decode(CatalogThread.self, from: json)
+        XCTAssertEqual(thread.num, 338026248)
+        XCTAssertEqual(thread.score, 47.94444444444444)
+    }
+
+    func test_threadListItem_decoding_withFloatingPointScore() throws {
+        let json = """
+        {
+            "num": 338026248,
+            "posts_count": 10,
+            "score": 52.125
+        }
+        """.data(using: .utf8)!
+
+        let item = try decoder.decode(ThreadListItem.self, from: json)
+        XCTAssertEqual(item.num, 338026248)
+        XCTAssertEqual(item.score, 52.125)
+    }
 }

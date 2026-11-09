@@ -32,7 +32,7 @@ public struct CatalogThreadItem: Codable, Identifiable, Hashable, Sendable {
     public let email: String?
     public let tags: String?
     public let files: [MediaFile]
-    public let score: Int?
+    public let score: Double?
 
     enum CodingKeys: String, CodingKey {
         case num
@@ -130,8 +130,18 @@ public struct CatalogThreadItem: Codable, Identifiable, Hashable, Sendable {
         self.trip = try? container.decode(String.self, forKey: .trip)
         self.email = try? container.decode(String.self, forKey: .email)
         self.tags = try? container.decode(String.self, forKey: .tags)
-        self.files = (try? container.decode([MediaFile].self, forKey: .files)) ?? []
-        self.score = try? container.decode(Int.self, forKey: .score)
+        if let lossyFiles = try? container.decode([LossyMediaFile].self, forKey: .files) {
+            self.files = lossyFiles.compactMap(\.value)
+        } else {
+            self.files = (try? container.decode([MediaFile].self, forKey: .files)) ?? []
+        }
+        if let doubleScore = try? container.decode(Double.self, forKey: .score) {
+            self.score = doubleScore
+        } else if let intScore = try? container.decode(Int.self, forKey: .score) {
+            self.score = Double(intScore)
+        } else {
+            self.score = nil
+        }
     }
 
     // MARK: - Computed Properties
@@ -154,6 +164,11 @@ public struct CatalogThreadItem: Codable, Identifiable, Hashable, Sendable {
     /// Primary thumbnail / media attachment.
     public var primaryFile: MediaFile? {
         return files.first
+    }
+
+    /// Stripped plain-text comment representation for reliable search indexing.
+    public var plainTextComment: String {
+        return MakabaHTMLParser.toPlainText(html: comment)
     }
 
     /// Subject line or clean excerpt from comment.

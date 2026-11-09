@@ -48,7 +48,7 @@ public enum MediaType: Int, Codable, Hashable, Sendable {
 
 /// Represents an attached file (image, WebM, GIF, MP4, sticker) on a post.
 public struct MediaFile: Codable, Identifiable, Hashable, Sendable {
-    public var id: String { name }
+    public var id: String { "\(name)_\(path)" }
 
     public let displayname: String?
     public let fullname: String?

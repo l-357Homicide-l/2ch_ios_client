@@ -107,19 +107,73 @@ public final class PoWSolver: Sendable {
         throw PoWError.limitExceeded(limit)
     }
 
-    /// Solves the Makaba SHA-512 Proof of Work challenge asynchronously on a background cooperative task.
+    /// Solves the Makaba SHA-512 Proof of Work challenge asynchronously utilizing cooperative multi-core task groups.
     ///
     /// - Parameters:
     ///   - template: Format string containing '%d'.
     ///   - targetHash: 128-character hexadecimal target SHA-512 string.
     ///   - limit: Maximum iterations to probe.
     /// - Returns: A `PoWResult` containing the discovered nonce, matching hex hash, and elapsed time in ms.
-    public static func solveAsync(template: String, targetHash: String, limit: Int = 20000) async throws -> PoWResult {
+    public static func solveAsync(
+        template: String,
+        targetHash: String,
+        limit: Int = 20000
+    ) async throws -> PoWResult {
         try Task.checkCancellation()
-        return try await Task.detached(priority: .userInitiated) {
-            try Task.checkCancellation()
-            return try solve(template: template, targetHash: targetHash, limit: limit)
-        }.value
+        guard limit > 0 else { throw PoWError.limitExceeded(limit) }
+        guard template.contains("%d") else { throw PoWError.invalidTemplate }
+        let parts = template.components(separatedBy: "%d")
+        guard parts.count == 2 else { throw PoWError.invalidTemplate }
+        let prefix = parts[0]
+        let suffix = parts[1]
+
+        let normalizedTarget = targetHash.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard normalizedTarget.count == 128, let targetBytes = hexToBytes(normalizedTarget) else {
+            throw PoWError.invalidTargetHash
+        }
+
+        let startTime = CFAbsoluteTimeGetCurrent()
+        let coreCount = max(1, ProcessInfo.processInfo.activeProcessorCount)
+
+        return try await withTaskGroup(of: (Int, String)?.self) { group in
+            for workerIndex in 0..<coreCount {
+                group.addTask {
+                    var nonce = workerIndex
+                    var iterations = 0
+                    while nonce < limit {
+                        iterations += 1
+                        if (iterations & 1023) == 0 && Task.isCancelled {
+                            return nil
+                        }
+                        let candidate = "\(prefix)\(nonce)\(suffix)"
+                        guard let data = candidate.data(using: .utf8) else {
+                            nonce += coreCount
+                            continue
+                        }
+                        let digest = SHA512.hash(data: data)
+                        if digest.elementsEqual(targetBytes) {
+                            let hexString = digest.map { String(format: "%02x", $0) }.joined()
+                            return (nonce, hexString)
+                        }
+                        nonce += coreCount
+                    }
+                    return nil
+                }
+            }
+
+            for await result in group {
+                if let (nonce, hex) = result {
+                    group.cancelAll()
+                    let durationMs = (CFAbsoluteTimeGetCurrent() - startTime) * 1000.0
+                    return PoWResult(nonce: nonce, hash: hex, durationMs: durationMs)
+                }
+            }
+
+            if Task.isCancelled {
+                throw PoWError.cancelled
+            }
+            throw PoWError.limitExceeded(limit)
+        }
     }
 
     // MARK: - Private Helpers

@@ -244,33 +244,33 @@ public struct MediaGalleryView: View {
 
         Task {
             do {
-                let (data, _) = try await URLSession.shared.data(from: url)
-                guard let image = UIImage(data: data) else {
+                let (data, response) = try await URLSession.shared.data(from: url)
+                guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
+                    let code = (response as? HTTPURLResponse)?.statusCode ?? 500
+                    throw MakabaAPIError.serverError(statusCode: code)
+                }
+
+                let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
+                guard status == .authorized || status == .limited else {
                     await MainActor.run {
-                        self.saveAlertMessage = "Не удалось декодировать изображение."
+                        self.saveAlertMessage = "Доступ к Фото запрещен. Разрешите доступ в Настройках iOS."
                         self.isShowingSaveAlert = true
                     }
                     return
                 }
 
-                let saver = ImageSaver { success, error in
-                    Task { @MainActor in
-                        if success {
-                            self.saveAlertMessage = "Изображение успешно сохранено в Фото."
-                        } else {
-                            self.saveAlertMessage = "Ошибка сохранения: \(error?.localizedDescription ?? "Доступ запрещен")"
-                        }
-                        self.isShowingSaveAlert = true
-                        self.activeImageSaver = nil
-                    }
+                try await PHPhotoLibrary.shared().performChanges {
+                    let request = PHAssetCreationRequest.forAsset()
+                    request.addResource(with: .photo, data: data, options: nil)
                 }
+
                 await MainActor.run {
-                    self.activeImageSaver = saver
+                    self.saveAlertMessage = "Изображение успешно сохранено в Фото."
+                    self.isShowingSaveAlert = true
                 }
-                saver.saveImage(image)
             } catch {
                 await MainActor.run {
-                    self.saveAlertMessage = "Ошибка загрузки: \(error.localizedDescription)"
+                    self.saveAlertMessage = "Ошибка сохранения: \(error.localizedDescription)"
                     self.isShowingSaveAlert = true
                 }
             }
@@ -300,7 +300,12 @@ public struct MediaGalleryView: View {
                     return
                 }
 
-                let (tempDownloadURL, _) = try await URLSession.shared.download(from: url)
+                let (tempDownloadURL, response) = try await URLSession.shared.download(from: url)
+                guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
+                    let code = (response as? HTTPURLResponse)?.statusCode ?? 500
+                    throw MakabaAPIError.serverError(statusCode: code)
+                }
+
                 let tempDir = FileManager.default.temporaryDirectory
                 let targetURL = tempDir.appendingPathComponent(url.lastPathComponent)
                 try? FileManager.default.removeItem(at: targetURL)
@@ -323,7 +328,8 @@ public struct MediaGalleryView: View {
                 let localDest = downloadsDir.appendingPathComponent(url.lastPathComponent)
                 try? FileManager.default.removeItem(at: localDest)
 
-                if let (tempDownloadURL, _) = try? await URLSession.shared.download(from: url) {
+                if let (tempDownloadURL, response) = try? await URLSession.shared.download(from: url),
+                   let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) {
                     try? FileManager.default.moveItem(at: tempDownloadURL, to: localDest)
                     await MainActor.run {
                         self.saveAlertMessage = "Видео сохранено в папку 'Файлы / Makaba / Downloads' (системная галерея iOS не поддерживает raw WebM напрямую)."
@@ -363,7 +369,7 @@ public struct MediaItemView: View {
         self.isActive = isActive
         self.onSingleTap = onSingleTap
         self.onZoomChanged = onZoomChanged
-        self._isNSFWRevealed = State(initialValue: file.nsfw != 1)
+        self._isNSFWRevealed = State(initialValue: (file.nsfw ?? 0) == 0)
     }
 
     public var body: some View {
@@ -398,13 +404,13 @@ public struct MediaItemView: View {
                     )
                 }
             }
-            .blur(radius: (file.nsfw == 1 && !isNSFWRevealed) ? 28 : 0)
-            .onChange(of: isZoomed) { zoomed in
+            .blur(radius: ((file.nsfw ?? 0) != 0 && !isNSFWRevealed) ? 28 : 0)
+            .onValueChange(of: isZoomed) { zoomed in
                 onZoomChanged(zoomed)
             }
 
             // Fullscreen NSFW Shield
-            if file.nsfw == 1 && !isNSFWRevealed {
+            if (file.nsfw ?? 0) != 0 && !isNSFWRevealed {
                 Color.black.opacity(0.65)
                     .ignoresSafeArea()
 
@@ -446,7 +452,6 @@ public struct ZoomableImageView: View {
     public let file: MediaFile
     @Binding public var isZoomed: Bool
     public let onSingleTap: () -> Void
-    public let onDismissGesture: () -> Void
 
     @State private var scale: CGFloat = 1.0
     @State private var lastScale: CGFloat = 1.0
@@ -456,13 +461,11 @@ public struct ZoomableImageView: View {
     public init(
         file: MediaFile,
         isZoomed: Binding<Bool> = .constant(false),
-        onSingleTap: @escaping () -> Void,
-        onDismissGesture: @escaping () -> Void = {}
+        onSingleTap: @escaping () -> Void
     ) {
         self.file = file
         self._isZoomed = isZoomed
         self.onSingleTap = onSingleTap
-        self.onDismissGesture = onDismissGesture
     }
 
     public var body: some View {

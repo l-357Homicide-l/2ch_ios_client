@@ -29,6 +29,15 @@ public final class ThreadViewModel: ObservableObject {
     /// Flat ordered list of all media files in this thread.
     @Published public var allMediaFiles: [MediaFile] = []
 
+    /// Pre-parsed HTML AttributedString cache per post number to prevent main thread hitches.
+    @Published public var parsedComments: [Int: AttributedString] = [:]
+
+    /// Associated board model when loaded.
+    public var board: Board? { threadResponse?.board }
+
+    /// Whether this thread was retrieved from the 2ch archive (read-only).
+    @Published public var isArchived: Bool = false
+
     private let apiClient: MakabaAPIClient
 
     public init(boardId: String, threadNum: Int, apiClient: MakabaAPIClient = .shared) {
@@ -50,21 +59,70 @@ public final class ThreadViewModel: ObservableObject {
             let response = try await apiClient.fetchThread(board: boardId, threadNum: threadNum, ignoreCache: forceRefresh)
             self.threadResponse = response
 
-            // Incremental Diffing: Only append new posts to avoid re-rendering existing items and scroll hitches
-            if self.posts.isEmpty {
+            // Offload HTML Parsing to background cooperative task
+            let newPostsToParse = response.posts
+            let parsedMap = await Task.detached(priority: .userInitiated) {
+                newPostsToParse.reduce(into: [Int: AttributedString]()) { map, post in
+                    map[post.num] = MakabaHTMLParser.parse(html: post.comment)
+                }
+            }.value
+            self.parsedComments.merge(parsedMap) { _, new in new }
+
+            // Moderation-Aware Incremental Diffing
+            let responsePostMap = Dictionary(response.posts.map { ($0.num, $0) }, uniquingKeysWith: { first, _ in first })
+            let existingIDs = Set(self.posts.map(\.num))
+            let responseIDs = Set(response.posts.map(\.num))
+
+            let deletedIDs = existingIDs.subtracting(responseIDs)
+            let newPosts = response.posts.filter { !existingIDs.contains($0.num) }
+
+            if self.posts.isEmpty || forceRefresh {
                 self.posts = response.posts
                 self.buildReplyGraph()
                 self.buildMediaList()
-            } else if response.posts.count > self.posts.count {
-                let existingIds = Set(self.posts.map { $0.num })
-                let newPosts = response.posts.filter { !existingIds.contains($0.num) }
+            } else {
+                var updatedPosts = self.posts
+                // 1. Surgical removal of moderated/deleted posts
+                if !deletedIDs.isEmpty {
+                    updatedPosts.removeAll { deletedIDs.contains($0.num) }
+                }
+                // 2. In-place metadata updates (scores, likes)
+                for i in 0..<updatedPosts.count {
+                    if let updated = responsePostMap[updatedPosts[i].num] {
+                        updatedPosts[i] = updated
+                    }
+                }
+                // 3. Append strictly new posts
                 if !newPosts.isEmpty {
-                    self.posts.append(contentsOf: newPosts)
-                    self.buildIncrementalReplyGraph(newPosts: newPosts)
-                    self.buildIncrementalMediaList(newPosts: newPosts)
+                    updatedPosts.append(contentsOf: newPosts)
+                }
+                // 4. Atomic publisher emission
+                self.posts = updatedPosts
+
+                // 5. Rebuild reply backlinks graph and media list if set of posts changed
+                if !deletedIDs.isEmpty || !newPosts.isEmpty {
+                    self.buildReplyGraph()
+                    self.buildMediaList()
                 }
             }
 
+            self.isLoading = false
+            self.isRefreshing = false
+        } catch let apiError as MakabaAPIError {
+            // Auto-fallback to archived thread on 404 ([ISSUE-24])
+            var is404 = false
+            if case .httpError(let code, _) = apiError, code == 404 { is404 = true }
+            if is404, let archived = try? await apiClient.fetchArchivedThread(board: boardId, threadNum: threadNum) {
+                self.threadResponse = archived
+                self.posts = archived.posts
+                self.isArchived = true
+                self.buildReplyGraph()
+                self.buildMediaList()
+                self.isLoading = false
+                self.isRefreshing = false
+                return
+            }
+            self.errorMessage = apiError.localizedDescription
             self.isLoading = false
             self.isRefreshing = false
         } catch {
@@ -181,7 +239,7 @@ public struct ThreadView: View {
     // Unified state for modal sheets & popovers
     @State private var activeSheet: ActiveSheet? = nil
     @State private var activeMediaGallery: ActiveMediaGalleryPresentation? = nil
-    @State private var showScrollButtons: Bool = true
+    @State private var toastMessage: String? = nil
 
     public init(
         boardId: String,
@@ -212,6 +270,27 @@ public struct ThreadView: View {
                     floatingControls(proxy: proxy)
                         .padding(.trailing, 16)
                         .padding(.bottom, 20)
+                }
+
+                // Toast Feedback Overlay
+                if let toast = toastMessage {
+                    Text(toast)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .background(Color.black.opacity(0.85))
+                        .clipShape(Capsule())
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.bottom, 70)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .onAppear {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                                withAnimation {
+                                    self.toastMessage = nil
+                                }
+                            }
+                        }
                 }
             }
             .navigationTitle("/\(viewModel.boardId)/ #\(viewModel.threadNum)")
@@ -255,6 +334,8 @@ public struct ThreadView: View {
                     if let targetNum = Int(targetStr) {
                         if let targetPost = viewModel.posts.first(where: { $0.num == targetNum }) {
                             self.activeSheet = .quote(targetPost)
+                        } else {
+                            self.toastMessage = "Пост >>\(targetNum) находится в другом треде или был удалён."
                         }
                     }
                     return .handled
@@ -287,6 +368,7 @@ public struct ThreadView: View {
                         threadNum: viewModel.threadNum,
                         replyToPostNum: post.num,
                         threadTitle: viewModel.threadTitle,
+                        boardModel: viewModel.board,
                         apiClient: apiClient,
                         onPostSuccess: { _ in
                             Task {
@@ -323,6 +405,7 @@ public struct ThreadView: View {
                         boardId: viewModel.boardId,
                         threadNum: viewModel.threadNum,
                         replyNumbers: viewModel.repliesToMap[post.num] ?? [],
+                        preParsedComment: viewModel.parsedComments[post.num],
                         onQuoteTapped: { quoteNum in
                             if let targetPost = viewModel.posts.first(where: { $0.num == quoteNum }) {
                                 self.activeSheet = .quote(targetPost)
@@ -363,6 +446,22 @@ public struct ThreadView: View {
 
     private var opThreadHeaderView: some View {
         VStack(alignment: .leading, spacing: 8) {
+            // Archive Notification Banner ([ISSUE-24])
+            if viewModel.isArchived {
+                HStack(spacing: 8) {
+                    Image(systemName: "archivebox.fill")
+                        .foregroundColor(.orange)
+                    Text("Тред находится в архиве 2ch (только чтение)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.secondary)
+                    Spacer()
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color.orange.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+
             // Subject Title
             Text(viewModel.threadTitle)
                 .font(.title3.weight(.bold))
@@ -509,51 +608,4 @@ public struct SafariView: UIViewControllerRepresentable {
     }
 
     public func updateUIViewController(_ uiViewController: SFSafariViewController, context: Context) {}
-}
-
-// MARK: - Posting Placeholder Sheet (Milestone 5 Hook)
-
-public struct PostingPlaceholderSheet: View {
-    public let boardId: String
-    public let replyToPostNum: Int
-
-    @Environment(\.dismiss) private var dismiss
-
-    public init(boardId: String, replyToPostNum: Int) {
-        self.boardId = boardId
-        self.replyToPostNum = replyToPostNum
-    }
-
-    public var body: some View {
-        NavigationStack {
-            VStack(spacing: 20) {
-                Image(systemName: "square.and.pencil.circle.fill")
-                    .font(.system(size: 56))
-                    .foregroundColor(.orange)
-
-                Text("Ответ в тред /\(boardId)/")
-                    .font(.title2.weight(.bold))
-
-                Text("Ответ на пост >>\(replyToPostNum)")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-
-                Text("Интерфейс создания постов и ввода Emoji-капчи подключается в Milestone 5.")
-                    .font(.footnote)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 32)
-
-                Spacer()
-            }
-            .padding(.top, 40)
-            .navigationTitle("Новый ответ")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Отмена") { dismiss() }
-                }
-            }
-        }
-    }
 }

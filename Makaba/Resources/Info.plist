@@ -28,26 +28,35 @@
 	<string>Требуется для выбора изображений и видео при создании постов</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Требуется для сохранения картинок и видео из тредов в медиатеку устройства</string>
-	<key>UIBackgroundModes</key>
-	<array>
-		<string>audio</string>
-	</array>
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
-		<key>NSAllowsArbitraryLoads</key>
+		<key>NSAllowsArbitraryLoadsInWebContent</key>
 		<true/>
 	</dict>
-	<key>CFBundleURLTypes</key>
+	<key>UTImportedTypeDeclarations</key>
 	<array>
 		<dict>
-			<key>CFBundleTypeRole</key>
-			<string>Viewer</string>
-			<key>CFBundleURLName</key>
-			<string>org.2ch.quote</string>
-			<key>CFBundleURLSchemes</key>
+			<key>UTTypeIdentifier</key>
+			<string>org.webmproject.webm</string>
+			<key>UTTypeDescription</key>
+			<string>WebM Video</string>
+			<key>UTTypeConformsTo</key>
 			<array>
-				<string>makaba-quote</string>
+				<string>public.movie</string>
 			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>webm</string>
+				</array>
+				<key>public.mime-type</key>
+				<string>video/webm</string>
+			</dict>
 		</dict>
 	</array>
 	<key>UIApplicationSceneManifest</key>

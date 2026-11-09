@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import UIKit
 
 /// Specific errors thrown by the Makaba API client.
 public enum MakabaAPIError: Error, LocalizedError, Sendable {
@@ -15,21 +16,24 @@ public enum MakabaAPIError: Error, LocalizedError, Sendable {
     case decodingError(String)
     case serverError(code: Int, message: String)
     case networkError(String)
+    case timeout
 
     public var errorDescription: String? {
         switch self {
         case .invalidURL:
-            return "The requested URL is invalid."
+            return "Неверный адрес сервера (URL)."
         case .invalidResponse:
-            return "The server returned an invalid or unrecognized HTTP response."
+            return "Сервер вернул некорректный или нераспознанный ответ."
         case .httpError(let statusCode, _):
-            return "HTTP Error \(statusCode)."
+            return "Ошибка сервера (HTTP \(statusCode))."
         case .decodingError(let detail):
-            return "Failed to decode response JSON: \(detail)"
+            return "Ошибка декодирования данных: \(detail)"
         case .serverError(let code, let message):
-            return "Makaba API error [\(code)]: \(message)"
+            return "Ошибка API [\(code)]: \(message)"
         case .networkError(let detail):
-            return "Network connection error: \(detail)"
+            return "Ошибка подключения к сети: \(detail)"
+        case .timeout:
+            return "Превышено время ожидания ответа сервера."
         }
     }
 }
@@ -37,9 +41,24 @@ public enum MakabaAPIError: Error, LocalizedError, Sendable {
 /// Global shared in-memory response cache to ensure instantaneous board navigation and thread reopening.
 private actor ResponseCache {
     static let shared = ResponseCache()
+    private let maxEntries = 50
     private var catalogCache: [String: (data: CatalogResponse, timestamp: Date)] = [:]
     private var threadCache: [String: (data: ThreadResponse, timestamp: Date)] = [:]
     private var boardPageCache: [String: (data: ThreadResponse, timestamp: Date)] = [:]
+
+    init() {
+        Task { @MainActor in
+            NotificationCenter.default.addObserver(
+                forName: UIApplication.didReceiveMemoryWarningNotification,
+                object: nil,
+                queue: .main
+            ) { _ in
+                Task {
+                    await ResponseCache.shared.clearAll()
+                }
+            }
+        }
+    }
 
     func getCatalog(board: String, maxAge: TimeInterval = 180) -> CatalogResponse? {
         if let entry = catalogCache[board], Date().timeIntervalSince(entry.timestamp) < maxAge {
@@ -49,6 +68,9 @@ private actor ResponseCache {
     }
 
     func setCatalog(board: String, data: CatalogResponse) {
+        if catalogCache.count >= maxEntries {
+            evictOldest(from: &catalogCache)
+        }
         catalogCache[board] = (data, Date())
     }
 
@@ -62,6 +84,9 @@ private actor ResponseCache {
 
     func setThread(board: String, threadNum: Int, data: ThreadResponse) {
         let key = "\(board)/\(threadNum)"
+        if threadCache.count >= maxEntries {
+            evictOldest(from: &threadCache)
+        }
         threadCache[key] = (data, Date())
     }
 
@@ -75,7 +100,16 @@ private actor ResponseCache {
 
     func setBoardPage(board: String, page: Int, data: ThreadResponse) {
         let key = "\(board)/p\(page)"
+        if boardPageCache.count >= maxEntries {
+            evictOldest(from: &boardPageCache)
+        }
         boardPageCache[key] = (data, Date())
+    }
+
+    private func evictOldest<T>(from cache: inout [String: (data: T, timestamp: Date)]) {
+        if let oldestKey = cache.min(by: { $0.value.timestamp < $1.value.timestamp })?.key {
+            cache.removeValue(forKey: oldestKey)
+        }
     }
 
     func invalidateCatalog(board: String) {
@@ -139,7 +173,12 @@ public final class MakabaAPIClient: ObservableObject, Sendable {
     // MARK: - Public Read Endpoints
 
     /// Fetches all active public boards on 2ch.org.
-    public func fetchBoards() async throws -> [Board] {
+    public func fetchAllBoards() async throws -> [Board] {
+        return try await fetchBoards()
+    }
+
+    /// Fetches all active public boards on 2ch.org.
+    public func fetchAllBoards() async throws -> [Board] {
         let req = MakabaEndpoint.boards.request(baseURL: baseURL, passcodeToken: passcodeToken)
         let (data, response) = try await execute(request: req)
         try validateHTTPStatus(response, data: data)
@@ -160,15 +199,15 @@ public final class MakabaAPIClient: ObservableObject, Sendable {
         }
     }
 
-    /// Fetches and organizes all boards into category groups.
-    public func fetchBoardCategories() async throws -> [BoardCategory] {
-        let boards: [Board] = try await fetchBoards()
-        return BoardCategory.groupByCategory(boards)
+    /// Convenience alias for fetchAllBoards.
+    public func fetchBoards() async throws -> [Board] {
+        return try await fetchAllBoards()
     }
 
-    /// Overload resolving boards directly grouped into categories per PROJECT.md interface contract.
-    public func fetchBoards() async throws -> [BoardCategory] {
-        return try await fetchBoardCategories()
+    /// Fetches and organizes all boards into category groups.
+    public func fetchBoardCategories() async throws -> [BoardCategory] {
+        let boards: [Board] = try await fetchAllBoards()
+        return BoardCategory.groupByCategory(boards)
     }
 
     /// Fetches the catalog containing all active threads for a board, with high-performance response cache.
@@ -238,6 +277,20 @@ public final class MakabaAPIClient: ObservableObject, Sendable {
         }
     }
 
+    /// Fetches only new posts after `lastNum` for mobile delta updates.
+    public func fetchThreadAfter(board: String, threadNum: Int, lastNum: Int) async throws -> [Post] {
+        let req = MakabaEndpoint.threadAfter(board: board, threadNum: threadNum, lastNum: lastNum).request(baseURL: baseURL, passcodeToken: passcodeToken)
+        let (data, response) = try await execute(request: req)
+        try validateHTTPStatus(response, data: data)
+
+        do {
+            let decoded = try JSONDecoder().decode(ThreadResponse.self, from: data)
+            return decoded.posts
+        } catch {
+            throw MakabaAPIError.decodingError(error.localizedDescription)
+        }
+    }
+
     /// Fetches an archived thread history.
     public func fetchArchivedThread(board: String, threadNum: Int) async throws -> ThreadResponse {
         let req = MakabaEndpoint.archivedThread(board: board, threadNum: threadNum).request(baseURL: baseURL, passcodeToken: passcodeToken)
@@ -249,6 +302,22 @@ public final class MakabaAPIClient: ObservableObject, Sendable {
         } catch {
             throw MakabaAPIError.decodingError(error.localizedDescription)
         }
+    }
+
+    /// Authenticates with 2ch using a VIP passcode via POST /user/passlogin, storing the issued session cookie.
+    public func exchangePasscode(_ passcode: String) async throws -> Bool {
+        var req = MakabaEndpoint.passlogin.request(baseURL: baseURL)
+        req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        let bodyString = "passcode=\(passcode.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? passcode)"
+        req.httpBody = bodyString.data(using: .utf8)
+
+        let (data, response) = try await executeSingleShot(request: req)
+        try validateHTTPStatus(response, data: data)
+
+        // Store passcode securely in Keychain
+        KeychainService.savePasscode(passcode)
+        DomainConfigurationService.shared.setPasscode(passcode)
+        return true
     }
 
     // MARK: - Captcha & Verification Endpoints
@@ -356,10 +425,10 @@ public final class MakabaAPIClient: ObservableObject, Sendable {
 
         let (data, response): (Data, URLResponse)
         if let tempURL = tempURL {
-            (data, response) = try await uploadWithFailover(request: req, fileURL: tempURL)
+            (data, response) = try await uploadSingleShot(request: req, fileURL: tempURL)
         } else {
             req.httpBody = multipart.build()
-            (data, response) = try await execute(request: req)
+            (data, response) = try await executeSingleShot(request: req)
         }
 
         try validateHTTPStatus(response, data: data)
@@ -415,7 +484,47 @@ public final class MakabaAPIClient: ObservableObject, Sendable {
 
     // MARK: - Internal Networking Helpers
 
+    /// Single-shot execution for non-idempotent operations (POST/PUT/DELETE) preventing duplicate actions.
+    private func executeSingleShot(request: URLRequest) async throws -> (Data, URLResponse) {
+        var currentReq = request
+        let activeMirror = DomainConfigurationService.shared.activeDomain
+        if let url = currentReq.url, let rewritten = DomainConfigurationService.shared.rewriteURL(url, to: activeMirror) {
+            currentReq.url = rewritten
+        }
+        do {
+            return try await session.data(for: currentReq)
+        } catch let urlError as URLError {
+            throw MakabaAPIError.networkError(urlError.localizedDescription)
+        } catch {
+            throw MakabaAPIError.networkError(error.localizedDescription)
+        }
+    }
+
+    /// Single-shot upload for non-idempotent multipart form submissions (e.g. submitPost).
+    private func uploadSingleShot(request: URLRequest, fileURL: URL) async throws -> (Data, URLResponse) {
+        var currentReq = request
+        let activeMirror = DomainConfigurationService.shared.activeDomain
+        if let url = currentReq.url, let rewritten = DomainConfigurationService.shared.rewriteURL(url, to: activeMirror) {
+            currentReq.url = rewritten
+        }
+        do {
+            return try await session.upload(for: currentReq, fromFile: fileURL)
+        } catch let urlError as URLError {
+            throw MakabaAPIError.networkError(urlError.localizedDescription)
+        } catch {
+            throw MakabaAPIError.networkError(error.localizedDescription)
+        }
+    }
+
     private func execute(request: URLRequest) async throws -> (Data, URLResponse) {
+        // Disallow retry/failover on non-GET requests to prevent duplicate submissions and captcha burnout
+        guard (request.httpMethod ?? "GET").uppercased() == "GET" else {
+            return try await executeSingleShot(request: request)
+        }
+        return try await executeWithFailover(request: request)
+    }
+
+    private func executeWithFailover(request: URLRequest) async throws -> (Data, URLResponse) {
         var currentReq = request
         let maxAttempts = min(DomainConfigurationService.availableMirrors.count, 3)
         var lastError: Error?

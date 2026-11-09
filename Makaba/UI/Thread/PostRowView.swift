@@ -19,6 +19,10 @@ public struct PostRowView: View {
     public let onMediaTapped: (MediaFile) -> Void
 
     @State private var revealedNSFWFiles: Set<String> = []
+    @State private var revealedSpoilers: Set<Int> = []
+    @State private var localLikes: Int
+    @State private var localDislikes: Int
+    @State private var userVote: Int = 0
     private let parsedComment: AttributedString
 
     public init(
@@ -27,6 +31,7 @@ public struct PostRowView: View {
         boardId: String? = nil,
         threadNum: Int? = nil,
         replyNumbers: [Int] = [],
+        preParsedComment: AttributedString? = nil,
         onQuoteTapped: @escaping (Int) -> Void = { _ in },
         onReplyTapped: @escaping (Post) -> Void = { _ in },
         onMediaTapped: @escaping (MediaFile) -> Void = { _ in }
@@ -39,7 +44,9 @@ public struct PostRowView: View {
         self.onQuoteTapped = onQuoteTapped
         self.onReplyTapped = onReplyTapped
         self.onMediaTapped = onMediaTapped
-        self.parsedComment = MakabaHTMLParser.parse(html: post.comment)
+        self.parsedComment = preParsedComment ?? MakabaHTMLParser.parse(html: post.comment)
+        _localLikes = State(initialValue: post.likes ?? 0)
+        _localDislikes = State(initialValue: post.dislikes ?? 0)
     }
 
     public var body: some View {
@@ -60,12 +67,29 @@ public struct PostRowView: View {
                 attachmentsView
             }
 
-            // Formatted Post Comment Body
-            Text(parsedComment)
+            // Formatted Post Comment Body with Interactive Spoilers
+            Text(commentToRender)
                 .font(.body)
                 .textSelection(.enabled)
                 .lineSpacing(4)
                 .fixedSize(horizontal: false, vertical: true)
+                .environment(\.openURL, OpenURLAction { url in
+                    if url.scheme == "makaba-spoiler" {
+                        let pathParts = url.path.split(separator: "/")
+                        let targetIdx = pathParts.first.flatMap { Int($0) } ?? url.host.flatMap { Int($0) }
+                        if let sIdx = targetIdx {
+                            withAnimation(.easeInOut(duration: 0.15)) {
+                                if revealedSpoilers.contains(sIdx) {
+                                    revealedSpoilers.remove(sIdx)
+                                } else {
+                                    revealedSpoilers.insert(sIdx)
+                                }
+                            }
+                        }
+                        return .handled
+                    }
+                    return .systemAction
+                })
 
             // Backlink / Reply Graph Pills ("Ответы: >>123, >>124")
             if !replyNumbers.isEmpty {
@@ -79,6 +103,9 @@ public struct PostRowView: View {
                 .fill(cardBackgroundColor)
                 .shadow(color: Color.black.opacity(0.03), radius: 2, x: 0, y: 1)
         )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Пост номер \(post.num), автор \(cleanAuthorName), дата \(post.date)")
+        .accessibilityHint("Дважды коснитесь для вызова контекстного меню или ответа")
         .contextMenu {
             Button {
                 UIPasteboard.general.string = MakabaHTMLParser.toPlainText(html: post.comment)
@@ -156,6 +183,15 @@ public struct PostRowView: View {
                     .background(Capsule().fill(Color.orange))
             }
 
+            // (Вы) / (Вам) Badges
+            if let bId = boardId, !bId.isEmpty {
+                let isOwn = UserPostTracker.shared.isOwnPost(board: bId, num: post.num)
+                let isQuoting = UserPostTracker.shared.isQuotingUser(board: bId, post: post)
+                if isOwn || isQuoting {
+                    UserPostBadgeView(isOwn: isOwn, isQuotingYou: isQuoting)
+                }
+            }
+
             // Sage Badge
             if post.isSage {
                 Text("SAGE")
@@ -183,13 +219,88 @@ public struct PostRowView: View {
                 .font(.system(size: 11))
                 .foregroundColor(.secondary)
 
-            // Net Vote Score
-            if post.score != 0 {
+            // Likes / Dislikes or Net Vote Score
+            if post.likes != nil || post.dislikes != nil {
+                votingControls
+            } else if post.score != 0 {
                 Text(post.score > 0 ? "+\(post.score)" : "\(post.score)")
                     .font(.system(size: 11, weight: .bold))
                     .foregroundColor(post.score > 0 ? .green : .red)
             }
         }
+    }
+
+    private var votingControls: some View {
+        HStack(spacing: 4) {
+            Button {
+                castVote(isLike: true)
+            } label: {
+                HStack(spacing: 2) {
+                    Image(systemName: userVote == 1 ? "hand.thumbsup.fill" : "hand.thumbsup")
+                        .font(.system(size: 10))
+                    Text("\(localLikes)")
+                        .font(.system(size: 10, weight: .bold))
+                }
+                .foregroundColor(userVote == 1 ? .green : .secondary)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 2)
+                .background(Capsule().fill(userVote == 1 ? Color.green.opacity(0.15) : Color.secondary.opacity(0.1)))
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                castVote(isLike: false)
+            } label: {
+                HStack(spacing: 2) {
+                    Image(systemName: userVote == -1 ? "hand.thumbsdown.fill" : "hand.thumbsdown")
+                        .font(.system(size: 10))
+                    Text("\(localDislikes)")
+                        .font(.system(size: 10, weight: .bold))
+                }
+                .foregroundColor(userVote == -1 ? .red : .secondary)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 2)
+                .background(Capsule().fill(userVote == -1 ? Color.red.opacity(0.15) : Color.secondary.opacity(0.1)))
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func castVote(isLike: Bool) {
+        guard let bId = boardId, !bId.isEmpty else { return }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        if isLike {
+            if userVote == 1 { return }
+            if userVote == -1 {
+                localDislikes = max(0, localDislikes - 1)
+            }
+            userVote = 1
+            localLikes += 1
+            Task {
+                _ = try? await MakabaAPIClient.shared.likePost(board: bId, num: post.num)
+            }
+        } else {
+            if userVote == -1 { return }
+            if userVote == 1 {
+                localLikes = max(0, localLikes - 1)
+            }
+            userVote = -1
+            localDislikes += 1
+            Task {
+                _ = try? await MakabaAPIClient.shared.dislikePost(board: bId, num: post.num)
+            }
+        }
+    }
+
+    private var commentToRender: AttributedString {
+        guard MakabaHTMLParser.hasSpoilers(in: post.comment) else {
+            return parsedComment
+        }
+        return MakabaHTMLParser.parse(
+            html: post.comment,
+            postNum: post.num,
+            revealedSpoilers: revealedSpoilers
+        )
     }
 
     private var cleanAuthorName: String {
@@ -198,12 +309,19 @@ public struct PostRowView: View {
         return clean.isEmpty ? "Аноним" : clean
     }
 
+    private var isStaff: Bool {
+        if let trip = post.trip, trip == "!!%adm%!!" || trip.contains("%adm%") || trip.contains("%mod%") {
+            return true
+        }
+        return false
+    }
+
     private var authorNameColor: Color {
+        if isStaff {
+            return .red
+        }
         if post.isOP || isOPPost {
             return .orange
-        }
-        if post.name.contains("Admin") || post.name.contains("Mod") {
-            return .red
         }
         return .primary
     }
@@ -288,25 +406,8 @@ public struct PostRowView: View {
 
         ZStack {
             if let thumbURL = file.thumbnailURL {
-                AsyncImage(url: thumbURL) { phase in
-                    switch phase {
-                    case .empty:
-                        Rectangle()
-                            .fill(Color.secondary.opacity(0.15))
-                            .overlay(ProgressView().scaleEffect(0.8))
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .scaledToFill()
-                            .blur(radius: isNSFW ? 20 : 0)
-                    case .failure:
-                        Rectangle()
-                            .fill(Color.secondary.opacity(0.15))
-                            .overlay(Image(systemName: "photo").foregroundColor(.secondary))
-                    @unknown default:
-                        EmptyView()
-                    }
-                }
+                MediaThumbnailView(url: thumbURL, targetSize: CGSize(width: 300, height: 300))
+                    .blur(radius: isNSFW ? 20 : 0)
             } else {
                 Rectangle()
                     .fill(Color.secondary.opacity(0.15))
@@ -345,9 +446,15 @@ public struct PostRowView: View {
                     .font(.system(size: 8))
             }
 
-            if let duration = file.duration, file.isVideo {
-                Text(duration)
-                    .font(.system(size: 9, weight: .bold))
+            if file.isVideo {
+                if let duration = file.duration, !duration.isEmpty {
+                    Text(duration)
+                        .font(.system(size: 9, weight: .bold))
+                } else {
+                    let formatBadge = file.path.lowercased().hasSuffix(".webm") ? "WEBM" : "MP4"
+                    Text("\(formatBadge), \(file.formattedSize)")
+                        .font(.system(size: 9, weight: .bold))
+                }
             } else {
                 Text("\(file.width)×\(file.height), \(file.formattedSize)")
                     .font(.system(size: 9, weight: .medium))

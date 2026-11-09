@@ -70,12 +70,15 @@ public final class EmojiCaptchaViewModel: ObservableObject {
     @Published public var isSolved: Bool = false
     @Published public var warningMessage: String? = nil
     @Published public var currentRound: Int = 1
+    @Published public var tokenExpiresInSeconds: Int? = nil
+    @Published public var isTokenExpiringSoon: Bool = false
 
     private let apiClient: MakabaAPIClient
     private var currentChallengeID: String? = nil
     private var currentPoWResult: PoWResult? = nil
     private var activeTask: Task<Void, Never>? = nil
     private var cooldownTimerTask: Task<Void, Never>? = nil
+    private var expirationTimerTask: Task<Void, Never>? = nil
 
     public init(
         board: String,
@@ -90,12 +93,14 @@ public final class EmojiCaptchaViewModel: ObservableObject {
     deinit {
         activeTask?.cancel()
         cooldownTimerTask?.cancel()
+        expirationTimerTask?.cancel()
     }
 
     /// Initiates or restarts the full captcha acquisition and PoW workflow.
     public func startVerification() {
         activeTask?.cancel()
         cooldownTimerTask?.cancel()
+        expirationTimerTask?.cancel()
 
         self.verifiedToken = nil
         self.powNonce = nil
@@ -105,6 +110,8 @@ public final class EmojiCaptchaViewModel: ObservableObject {
         self.isSolved = false
         self.currentRound = 1
         self.warningMessage = nil
+        self.tokenExpiresInSeconds = nil
+        self.isTokenExpiringSoon = false
 
         activeTask = Task { [weak self] in
             guard let self = self else { return }
@@ -226,6 +233,7 @@ public final class EmojiCaptchaViewModel: ObservableObject {
                     self.verifiedToken = verifiedToken
                     self.isSolved = true
                     self.state = .verified(token: verifiedToken, powResult: powResult)
+                    self.startTokenExpirationCountdown(durationSeconds: 900)
                     return
                 }
 
@@ -287,6 +295,32 @@ public final class EmojiCaptchaViewModel: ObservableObject {
             // Once cooldown finishes, auto-restart verification if task was not cancelled
             if !Task.isCancelled {
                 self?.startVerification()
+            }
+        }
+    }
+
+    /// Tracks proactive token expiration and alerts before invalidation.
+    private func startTokenExpirationCountdown(durationSeconds: Int) {
+        expirationTimerTask?.cancel()
+        expirationTimerTask = Task { [weak self] in
+            var remaining = durationSeconds
+            while remaining > 0 {
+                guard !Task.isCancelled else { break }
+                self?.tokenExpiresInSeconds = remaining
+                self?.isTokenExpiringSoon = (remaining <= 60)
+                do {
+                    try await Task.sleep(nanoseconds: 1_000_000_000)
+                } catch {
+                    break
+                }
+                guard !Task.isCancelled else { break }
+                remaining -= 1
+            }
+            if !Task.isCancelled {
+                self?.tokenExpiresInSeconds = 0
+                self?.isSolved = false
+                self?.verifiedToken = nil
+                self?.state = .error(message: "Срок действия токена капчи истёк (15 минут). Обновите капчу перед отправкой.")
             }
         }
     }
@@ -369,16 +403,16 @@ public struct EmojiCaptchaView: View {
                 viewModel.startVerification()
             }
         }
-        .onChange(of: viewModel.verifiedToken) { token in
+        .onValueChange(of: viewModel.verifiedToken) { token in
             externalVerifiedToken?.wrappedValue = token
         }
-        .onChange(of: viewModel.powNonce) { nonce in
+        .onValueChange(of: viewModel.powNonce) { nonce in
             externalPowNonce?.wrappedValue = nonce
         }
-        .onChange(of: viewModel.captchaType) { cType in
+        .onValueChange(of: viewModel.captchaType) { cType in
             externalCaptchaType?.wrappedValue = cType
         }
-        .onChange(of: viewModel.isSolved) { solved in
+        .onValueChange(of: viewModel.isSolved) { solved in
             externalIsSolved?.wrappedValue = solved
         }
     }
@@ -588,10 +622,18 @@ public struct EmojiCaptchaView: View {
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(.green)
 
-                Text("Токен: \(token.prefix(20))...")
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(.secondary)
-                    .lineLimit(1)
+                if let exp = viewModel.tokenExpiresInSeconds {
+                    let mins = exp / 60
+                    let secs = exp % 60
+                    Text(String(format: "Токен действителен: %d:%02d", mins, secs))
+                        .font(.system(size: 11, weight: viewModel.isTokenExpiringSoon ? .bold : .regular))
+                        .foregroundColor(viewModel.isTokenExpiringSoon ? .orange : .secondary)
+                } else {
+                    Text("Токен: \(token.prefix(20))...")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
             }
 
             Spacer()

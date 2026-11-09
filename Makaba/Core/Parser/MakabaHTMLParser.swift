@@ -57,6 +57,7 @@ public final class MakabaHTMLParser: Sendable {
     private struct StyleState: Sendable {
         var isGreentext: Bool = false
         var isSpoiler: Bool = false
+        var spoilerIndex: Int? = nil
         var isBold: Bool = false
         var isItalic: Bool = false
         var isStrikethrough: Bool = false
@@ -68,13 +69,28 @@ public final class MakabaHTMLParser: Sendable {
 
     // MARK: - Public API
 
+    /// Fast detector whether HTML comment contains any spoiler markup.
+    public static func hasSpoilers(in html: String) -> Bool {
+        return html.contains("spoiler")
+    }
+
     /// Transforms raw Makaba HTML into a styled SwiftUI `AttributedString`.
     /// Execution latency: < 0.08ms per post in native Swift.
     public static func parse(html: String) -> AttributedString {
+        return parse(html: html, postNum: 0, revealedSpoilers: [])
+    }
+
+    /// Full parser with interactive tap-to-reveal spoiler link injection.
+    public static func parse(
+        html: String,
+        postNum: Int,
+        revealedSpoilers: Set<Int>
+    ) -> AttributedString {
         guard !html.isEmpty else { return AttributedString() }
 
         var result = AttributedString()
         var stateStack: [StyleState] = [StyleState()]
+        var spoilerCounter = 0
 
         var currentTextRun = ""
         let chars = Array(html)
@@ -95,12 +111,21 @@ public final class MakabaHTMLParser: Sendable {
                 segment.foregroundColor = greentextColor
             }
 
-            // 2. Spoiler styling: always open/visible by default per user specification,
-            // with subtle highlighted background and dotted accent underline marking it clearly as a spoiler.
-            if currentStyle.isSpoiler {
+            // 2. Interactive Tap-to-Reveal Spoiler styling
+            if currentStyle.isSpoiler, let sIdx = currentStyle.spoilerIndex {
                 segment.makabaSpoiler = true
-                segment.backgroundColor = Color.secondary.opacity(0.18)
-                segment.underlineStyle = Text.LineStyle(pattern: .dot, color: Color.orange.opacity(0.85))
+                let isRevealed = revealedSpoilers.contains(sIdx)
+                if isRevealed {
+                    segment.backgroundColor = Color.secondary.opacity(0.18)
+                    segment.underlineStyle = Text.LineStyle(pattern: .dot, color: Color.orange.opacity(0.85))
+                } else {
+                    segment.backgroundColor = Color(UIColor.tertiarySystemFill)
+                    segment.foregroundColor = Color.clear
+                    segment.underlineStyle = nil
+                }
+                if currentStyle.linkURL == nil {
+                    segment.link = URL(string: "makaba-spoiler://\(postNum)/\(sIdx)")
+                }
             }
 
             // 3. Typographic traits
@@ -270,7 +295,9 @@ public final class MakabaHTMLParser: Sendable {
             if lower.contains("unkfunc") {
                 nextState.isGreentext = true
             } else if lower.contains("spoiler") {
+                spoilerCounter += 1
                 nextState.isSpoiler = true
+                nextState.spoilerIndex = spoilerCounter
             }
             stateStack.append(nextState)
             return
@@ -422,8 +449,16 @@ public final class MakabaHTMLParser: Sendable {
         case "lt": return "<"
         case "gt": return ">"
         case "quot": return "\""
-        case "apos", "#39": return "'"
+        case "apos", "#39", "#039": return "'"
         case "nbsp": return " "
+        case "laquo": return "«"
+        case "raquo": return "»"
+        case "ndash": return "–"
+        case "mdash": return "—"
+        case "hellip": return "…"
+        case "copy": return "©"
+        case "reg": return "®"
+        case "trade": return "™"
         default:
             if entity.hasPrefix("#x") || entity.hasPrefix("#X") {
                 let hexStr = String(entity.dropFirst(2))
@@ -441,10 +476,20 @@ public final class MakabaHTMLParser: Sendable {
     }
 
     private static func trimTrailingNewlines(_ attr: AttributedString) -> AttributedString {
-        var copy = attr
-        while let lastChar = copy.characters.last, lastChar == "\n" || lastChar == " " {
-            copy.removeSubrange(copy.characters.index(before: copy.characters.endIndex)..<copy.characters.endIndex)
+        var endIndex = attr.characters.endIndex
+        let startIndex = attr.characters.startIndex
+        while endIndex > startIndex {
+            let prevIndex = attr.characters.index(before: endIndex)
+            let c = attr.characters[prevIndex]
+            if c == "\n" || c == " " {
+                endIndex = prevIndex
+            } else {
+                break
+            }
         }
-        return copy
+        if endIndex < attr.characters.endIndex {
+            return AttributedString(attr[startIndex..<endIndex])
+        }
+        return attr
     }
 }

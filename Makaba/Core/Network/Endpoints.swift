@@ -14,11 +14,13 @@ public enum MakabaEndpoint: Sendable {
     case threads(board: String)
     case boardPage(board: String, page: Int)
     case thread(board: String, threadNum: Int)
+    case threadAfter(board: String, threadNum: Int, lastNum: Int)
     case archivedThread(board: String, threadNum: Int)
     case captchaID(board: String, thread: Int)
     case captchaShow(id: String)
     case captchaClick
     case posting
+    case passlogin
     case like(board: String, num: Int)
     case dislike(board: String, num: Int)
     case media(path: String)
@@ -43,6 +45,8 @@ public enum MakabaEndpoint: Sendable {
             return "/\(board)/\(file)"
         case .thread(let board, let threadNum):
             return "/\(board)/res/\(threadNum).json"
+        case .threadAfter(let board, let threadNum, let lastNum):
+            return "/api/mobile/v2/after/\(board)/\(threadNum)/\(lastNum)"
         case .archivedThread(let board, let threadNum):
             return "/arch/\(board)/res/\(threadNum).json"
         case .captchaID:
@@ -53,6 +57,8 @@ public enum MakabaEndpoint: Sendable {
             return "/api/captcha/emoji/click"
         case .posting:
             return "/user/posting"
+        case .passlogin:
+            return "/user/passlogin"
         case .like:
             return "/api/like"
         case .dislike:
@@ -91,7 +97,7 @@ public enum MakabaEndpoint: Sendable {
     /// HTTP method used for the endpoint.
     public var httpMethod: String {
         switch self {
-        case .captchaClick, .posting:
+        case .captchaClick, .posting, .passlogin:
             return "POST"
         default:
             return "GET"
@@ -129,7 +135,18 @@ public enum MakabaEndpoint: Sendable {
         req.setValue("application/json, text/plain, */*", forHTTPHeaderField: "Accept")
 
         if let token = passcodeToken, !token.isEmpty {
-            req.setValue("usercode=\(token); passcode_auth=\(token)", forHTTPHeaderField: "Cookie")
+            if let host = baseURL.host {
+                let cookieDomain = host.hasPrefix(".") ? host : ".\(host)"
+                if let cookie = HTTPCookie(properties: [
+                    .domain: cookieDomain,
+                    .path: "/",
+                    .name: "passcode_auth",
+                    .value: token,
+                    .secure: "TRUE"
+                ]) {
+                    HTTPCookieStorage.shared.setCookie(cookie)
+                }
+            }
         }
 
         return req

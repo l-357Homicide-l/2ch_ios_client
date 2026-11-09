@@ -137,7 +137,7 @@ public struct ThreadListItem: Codable, Identifiable, Hashable, Sendable {
     public let postsCount: Int
     public let filesCount: Int?
     public let views: Int?
-    public let score: Int?
+    public let score: Double?
 
     enum CodingKeys: String, CodingKey {
         case num
@@ -184,7 +184,13 @@ public struct ThreadListItem: Codable, Identifiable, Hashable, Sendable {
         self.postsCount = (try? container.decode(Int.self, forKey: .postsCount)) ?? 0
         self.filesCount = try? container.decode(Int.self, forKey: .filesCount)
         self.views = try? container.decode(Int.self, forKey: .views)
-        self.score = try? container.decode(Int.self, forKey: .score)
+        if let doubleScore = try? container.decode(Double.self, forKey: .score) {
+            self.score = doubleScore
+        } else if let intScore = try? container.decode(Int.self, forKey: .score) {
+            self.score = Double(intScore)
+        } else {
+            self.score = nil
+        }
     }
 }
 

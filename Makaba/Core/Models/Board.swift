@@ -223,14 +223,37 @@ public struct Board: Codable, Identifiable, Hashable, Sendable {
         }
         return defaultValue
     }
-    /// Known boards permanently removed or returning HTTP 500 on 2ch.org.
-    public static let defunctBoardIDs: Set<String> = [
-        "fur", "vn", "ho", "h", "r34", "hg", "e", "ruvn", "fet", "nf"
-    ]
+    // MARK: - Dynamic Defunct Board Registry
 
-    /// Whether this board is permanently defunct on 2ch.org.
+    private static let defunctLock = NSLock()
+    private static var dynamicDefunctBoardIDs: Set<String> = []
+
+    /// Dynamically flags a board as defunct when receiving HTTP 404/410 or permanent deprecation redirects.
+    public static func markDefunct(boardId: String) {
+        defunctLock.lock()
+        dynamicDefunctBoardIDs.insert(boardId.lowercased())
+        defunctLock.unlock()
+    }
+
+    /// Clears defunct flag when a board responds with active threads.
+    public static func markActive(boardId: String) {
+        defunctLock.lock()
+        dynamicDefunctBoardIDs.remove(boardId.lowercased())
+        defunctLock.unlock()
+    }
+
+    /// Dynamically discovered defunct boards based on runtime HTTP status.
+    public static var defunctBoardIDs: Set<String> {
+        defunctLock.lock()
+        defer { defunctLock.unlock() }
+        return dynamicDefunctBoardIDs
+    }
+
+    /// Whether this board has been determined defunct by network status.
     public var isDefunct: Bool {
-        Self.defunctBoardIDs.contains(id.lowercased())
+        Self.defunctLock.lock()
+        defer { Self.defunctLock.unlock() }
+        return Self.dynamicDefunctBoardIDs.contains(id.lowercased())
     }
 
     // MARK: - Equatable & Hashable Identity
@@ -283,9 +306,12 @@ public struct BoardCategory: Identifiable, Hashable, Sendable {
             }
         }
 
-        for (name, list) in grouped where !processed.contains(name) {
-            let sortedList = list.sorted { $0.id < $1.id }
-            categories.append(BoardCategory(name: name, boards: sortedList))
+        let remainingNames = grouped.keys.filter { !processed.contains($0) }.sorted()
+        for name in remainingNames {
+            if let list = grouped[name], !list.isEmpty {
+                let sortedList = list.sorted { $0.id < $1.id }
+                categories.append(BoardCategory(name: name, boards: sortedList))
+            }
         }
 
         // Add defunct / archived boards under a dedicated section at the bottom

@@ -1,0 +1,39 @@
+{
+  "name": "Makaba Community Repository",
+  "identifier": "org.makaba.source",
+  "apps": [
+    {
+      "name": "Makaba",
+      "bundleIdentifier": "org.makaba.MakabaIOS",
+      "developerName": "Makaba Open Source",
+      "version": "1.0.0",
+      "versionDate": "2026-11-10T00:00:00Z",
+      "versionDescription": "Release 1.0.0: Native 2ch.hk iOS client with KSPlayer WebM playback, biometric Keychain passcode storage, multi-core PoW solver, and tap-to-reveal spoilers.",
+      "downloadURL": "https://github.com/l-357Homicide-l/2ch_ios_client/releases/latest/download/Makaba.ipa",
+      "localizedDescription": "Fast, native, privacy-focused iOS client for the 2ch.org (Двач) imageboard. Features hardware-accelerated WebM/VP9 media playback, offline thread vault, customizable AMOLED themes, and zero-telemetry architecture.",
+      "iconURL": "https://raw.githubusercontent.com/l-357Homicide-l/2ch_ios_client/main/Makaba/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-60x60@2x.png",
+      "tintColor": "FF8800",
+      "size": 18500000,
+      "screenshotURLs": [
+        "https://raw.githubusercontent.com/l-357Homicide-l/2ch_ios_client/main/docs/screenshots/catalog.png",
+        "https://raw.githubusercontent.com/l-357Homicide-l/2ch_ios_client/main/docs/screenshots/thread.png"
+      ],
+      "permissions": [
+        {
+          "type": "photos",
+          "usageDescription": "Для сохранения изображений и WebM-видео в Медиатеку Фото."
+        }
+      ]
+    }
+  ],
+  "news": [
+    {
+      "title": "Makaba 1.0.0 Released",
+      "identifier": "release-1.0.0",
+      "appID": "org.makaba.MakabaIOS",
+      "date": "2026-11-10",
+      "notify": true,
+      "caption": "Первый стабильный релиз мобильного клиента Двача для iOS 16+"
+    }
+  ]
+}

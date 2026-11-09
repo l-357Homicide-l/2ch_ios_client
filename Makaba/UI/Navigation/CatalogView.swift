@@ -75,79 +75,107 @@ public final class CatalogViewModel: ObservableObject {
         }
 
         do {
-            let response = try await apiClient.fetchCatalog(board: board.id, ignoreCache: forceRefresh)
-            self.threads = response.threads
+            try await withThrowingTaskGroup(of: Void.self) { group in
+                group.addTask {
+                    try await Task.sleep(nanoseconds: 15_000_000_000)
+                    throw MakabaAPIError.timeout
+                }
+                group.addTask {
+                    try await self.performCatalogCascade(forceRefresh: forceRefresh)
+                }
+                _ = try await group.next()
+                group.cancelAll()
+            }
+            self.isLoading = false
+        } catch let apiError as MakabaAPIError {
+            switch apiError {
+            case .httpError(let statusCode, _):
+                if statusCode == 404 || (500...599).contains(statusCode) {
+                    self.errorMessage = "Доска /\(board.id)/ закрыта администрацией сайта или временно недоступна (код \(statusCode))."
+                } else {
+                    self.errorMessage = apiError.localizedDescription
+                }
+            case .timeout:
+                self.errorMessage = "Превышено время ожидания ответа каталога доски /\(board.id)/ (15 сек)."
+            default:
+                self.errorMessage = apiError.localizedDescription
+            }
             self.isLoading = false
         } catch {
-            // Secondary fallback 1: index.json (Page 0) for boards without catalog.json
-            if let pageResponse = try? await apiClient.fetchBoardPage(board: board.id, page: 0, ignoreCache: forceRefresh) {
-                let convertedThreads = pageResponse.threads.compactMap { threadContainer -> CatalogThreadItem? in
-                    guard let opPost = threadContainer.posts.first else { return nil }
-                    return CatalogThreadItem(
-                        num: opPost.num,
-                        parent: 0,
-                        board: board.id,
-                        subject: opPost.subject ?? "",
-                        comment: opPost.comment,
-                        date: opPost.date,
-                        timestamp: opPost.timestamp,
-                        lasthit: opPost.timestamp,
-                        views: opPost.views ?? 0,
-                        postsCount: threadContainer.posts.count,
-                        filesCount: threadContainer.posts.reduce(0) { $0 + $1.files.count },
-                        files: opPost.files
-                    )
-                }
-                if !convertedThreads.isEmpty {
-                    self.threads = convertedThreads
-                    self.isLoading = false
-                    return
-                }
-            }
-
-            // Secondary fallback 2: threads.json (flat listing)
-            if let listResponse = try? await apiClient.fetchThreadList(board: board.id), !listResponse.threads.isEmpty {
-                let convertedThreads = listResponse.threads.map { item in
-                    CatalogThreadItem(
-                        num: item.num,
-                        parent: 0,
-                        board: board.id,
-                        subject: item.subject,
-                        comment: item.comment,
-                        date: "",
-                        timestamp: item.timestamp,
-                        lasthit: item.lasthit,
-                        views: item.views ?? 0,
-                        postsCount: item.postsCount,
-                        filesCount: item.filesCount ?? 0,
-                        files: []
-                    )
-                }
-                self.threads = convertedThreads
-                self.isLoading = false
-                return
-            }
-
-            let errStr = error.localizedDescription
-            if errStr.contains("404") || errStr.contains("500") || errStr.contains("Server Error") {
-                self.errorMessage = "Доска /\(board.id)/ закрыта администрацией сайта или временно недоступна (код ответа сервера)."
-            } else {
-                self.errorMessage = errStr
-            }
+            self.errorMessage = error.localizedDescription
             self.isLoading = false
         }
+    }
+
+    private func performCatalogCascade(forceRefresh: Bool) async throws {
+        // Attempt 1: catalog.json
+        do {
+            let response = try await apiClient.fetchCatalog(board: board.id, ignoreCache: forceRefresh)
+            self.threads = response.threads
+            return
+        } catch {}
+
+        // Attempt 2: index.json (Page 0)
+        if let pageResponse = try? await apiClient.fetchBoardPage(board: board.id, page: 0, ignoreCache: forceRefresh) {
+            let convertedThreads = pageResponse.threads.compactMap { threadContainer -> CatalogThreadItem? in
+                guard let opPost = threadContainer.posts.first else { return nil }
+                return CatalogThreadItem(
+                    num: opPost.num,
+                    parent: 0,
+                    board: board.id,
+                    subject: opPost.subject ?? "",
+                    comment: opPost.comment,
+                    date: opPost.date,
+                    timestamp: opPost.timestamp,
+                    lasthit: opPost.timestamp,
+                    views: opPost.views ?? 0,
+                    postsCount: threadContainer.posts.count,
+                    filesCount: threadContainer.posts.reduce(0) { $0 + $1.files.count },
+                    files: opPost.files
+                )
+            }
+            if !convertedThreads.isEmpty {
+                self.threads = convertedThreads
+                return
+            }
+        }
+
+        // Attempt 3: threads.json (flat listing)
+        if let listResponse = try? await apiClient.fetchThreadList(board: board.id), !listResponse.threads.isEmpty {
+            let convertedThreads = listResponse.threads.map { item in
+                CatalogThreadItem(
+                    num: item.num,
+                    parent: 0,
+                    board: board.id,
+                    subject: item.subject,
+                    comment: item.comment,
+                    date: "",
+                    timestamp: item.timestamp,
+                    lasthit: item.lasthit,
+                    views: item.views ?? 0,
+                    postsCount: item.postsCount,
+                    filesCount: item.filesCount ?? 0,
+                    files: []
+                )
+            }
+            self.threads = convertedThreads
+            return
+        }
+
+        // All cascaded fallbacks failed, throw terminal 404 or network error
+        throw MakabaAPIError.httpError(statusCode: 404, data: nil)
     }
 
     /// Filtered and sorted thread list according to search query and sort mode.
     public var filteredThreads: [CatalogThreadItem] {
         var result = threads
 
-        // Search filtering
+        // Search filtering against plain-text (strips HTML tags to prevent <br> matching)
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if !query.isEmpty {
             result = result.filter { thread in
                 thread.subject.lowercased().contains(query) ||
-                thread.comment.lowercased().contains(query) ||
+                thread.plainTextComment.lowercased().contains(query) ||
                 String(thread.num).contains(query)
             }
         }
@@ -167,6 +195,13 @@ public final class CatalogViewModel: ObservableObject {
                     return $0.isPinned && !$1.isPinned
                 }
                 return $0.postsCount > $1.postsCount
+            }
+        case .score:
+            result.sort {
+                if $0.isPinned != $1.isPinned {
+                    return $0.isPinned && !$1.isPinned
+                }
+                return ($0.score ?? 0.0) > ($1.score ?? 0.0)
             }
         case .score:
             result.sort {
@@ -501,31 +536,8 @@ public struct CatalogGridCard: View {
     private var thumbnailView: some View {
         Group {
             if let primary = thread.primaryFile, let thumbURL = primary.thumbnailURL {
-                AsyncImage(url: thumbURL) { phase in
-                    switch phase {
-                    case .empty:
-                        Rectangle()
-                            .fill(Color.secondary.opacity(0.15))
-                            .overlay(ProgressView().scaleEffect(0.8))
-                    case .success(let image):
-                        Color.clear
-                            .overlay(
-                                image
-                                    .resizable()
-                                    .scaledToFill()
-                            )
-                            .clipped()
-                    case .failure:
-                        Rectangle()
-                            .fill(Color.secondary.opacity(0.15))
-                            .overlay(
-                                Image(systemName: "photo")
-                                    .foregroundColor(.secondary)
-                            )
-                    @unknown default:
-                        EmptyView()
-                    }
-                }
+                MediaThumbnailView(url: thumbURL, targetSize: CGSize(width: 180, height: 180))
+                    .clipped()
             } else {
                 ZStack {
                     LinearGradient(
@@ -662,24 +674,7 @@ public struct CatalogListRow: View {
     private var thumbnailView: some View {
         Group {
             if let primary = thread.primaryFile, let thumbURL = primary.thumbnailURL {
-                AsyncImage(url: thumbURL) { phase in
-                    switch phase {
-                    case .empty:
-                        Rectangle()
-                            .fill(Color.secondary.opacity(0.15))
-                            .overlay(ProgressView().scaleEffect(0.7))
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .scaledToFill()
-                    case .failure:
-                        Rectangle()
-                            .fill(Color.secondary.opacity(0.15))
-                            .overlay(Image(systemName: "photo").foregroundColor(.secondary))
-                    @unknown default:
-                        EmptyView()
-                    }
-                }
+                MediaThumbnailView(url: thumbURL, targetSize: CGSize(width: 152, height: 152))
             } else {
                 Rectangle()
                     .fill(Color.secondary.opacity(0.1))

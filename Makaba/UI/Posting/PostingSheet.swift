@@ -84,14 +84,24 @@ public final class PostingViewModel: ObservableObject {
     @Published public var isOPMark: Bool = false
     @Published public var attachments: [PostingAttachmentItem] = []
 
-    // Captcha ViewModel & Bindings
+    // Captcha ViewModel (Single Source of Truth)
     @Published public var captchaViewModel: EmojiCaptchaViewModel
-    @Published public var verifiedCaptchaToken: String? = nil
-    @Published public var powNonce: String? = nil
-    @Published public var captchaType: String? = "emoji_captcha"
-    @Published public var isCaptchaSolved: Bool = false
-    @Published public var captchaSolvedDate: Date? = nil
-    @Published public var isCaptchaExpired: Bool = false
+
+    public var verifiedCaptchaToken: String? {
+        captchaViewModel.verifiedToken
+    }
+    public var powNonce: String? {
+        captchaViewModel.resolvedNonce ?? captchaViewModel.powNonce
+    }
+    public var captchaType: String? {
+        captchaViewModel.captchaType
+    }
+    public var isCaptchaSolved: Bool {
+        captchaViewModel.isSolved
+    }
+    public var isCaptchaExpired: Bool {
+        captchaViewModel.tokenExpiresInSeconds == 0
+    }
 
     // State & UI feedback
     @Published public var isSubmitting: Bool = false
@@ -134,39 +144,22 @@ public final class PostingViewModel: ObservableObject {
             self.comment = ">>\(replyNum)\n"
         }
 
-        // Synchronize captcha state from captchaViewModel to PostingViewModel
-        captchaVM.$verifiedToken
-            .sink { [weak self] token in
-                self?.verifiedCaptchaToken = token
-            }
-            .store(in: &cancellables)
-
-        captchaVM.$powNonce
-            .sink { [weak self] nonce in
-                self?.powNonce = nonce
-            }
-            .store(in: &cancellables)
-
-        captchaVM.$captchaType
-            .sink { [weak self] cType in
-                self?.captchaType = cType
-            }
-            .store(in: &cancellables)
-
-        captchaVM.$isSolved
-            .sink { [weak self] solved in
-                self?.isCaptchaSolved = solved
-                if solved {
-                    self?.captchaSolvedDate = Date()
-                    self?.isCaptchaExpired = false
-                }
-            }
-            .store(in: &cancellables)
     }
 
     // MARK: - Draft Management
 
+    private var draftSaveTask: Task<Void, Never>?
+
     public func saveDraft() {
+        draftSaveTask?.cancel()
+        draftSaveTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 800_000_000)
+            guard !Task.isCancelled, let self = self else { return }
+            self.persistDraftNow()
+        }
+    }
+
+    public func persistDraftNow() {
         guard !comment.isEmpty || !subject.isEmpty else { return }
         let dict: [String: String] = [
             "comment": comment,
@@ -209,6 +202,8 @@ public final class PostingViewModel: ObservableObject {
         guard comment.count <= maxCommentLimit else { return false }
         guard isCaptchaSolved || captchaViewModel.isSolved else { return false }
         guard attachments.count <= Self.maxAttachmentsCount else { return false }
+        let totalBytes = attachments.reduce(0) { $0 + $1.data.count }
+        if totalBytes > maxFileSizeBytes { return false }
         for att in attachments {
             if att.data.count > maxFileSizeBytes { return false }
         }
@@ -230,6 +225,10 @@ public final class PostingViewModel: ObservableObject {
         if attachments.count > Self.maxAttachmentsCount {
             return "Максимальное количество прикрепленных файлов — 4."
         }
+        let totalBytes = attachments.reduce(0) { $0 + $1.data.count }
+        if totalBytes > maxFileSizeBytes {
+            return "Суммарный размер файлов (\(totalBytes / (1024 * 1024)) МБ) превышает допустимый лимит (\(maxFileSizeBytes / (1024 * 1024)) МБ)."
+        }
         for att in attachments {
             if att.data.count > maxFileSizeBytes {
                 return "Файл «\(att.fileName)» превышает лимит \(maxFileSizeBytes / (1024 * 1024)) МБ."
@@ -247,6 +246,11 @@ public final class PostingViewModel: ObservableObject {
         }
         guard item.data.count <= maxFileSizeBytes else {
             self.errorMessage = "Файл «\(item.fileName)» превышает допустимый лимит (\(item.fileSizeFormatted))."
+            return false
+        }
+        let totalBytes = attachments.reduce(0) { $0 + $1.data.count } + item.data.count
+        guard totalBytes <= maxFileSizeBytes else {
+            self.errorMessage = "Суммарный размер файлов превышает допустимый лимит (\(maxFileSizeBytes / (1024 * 1024)) МБ)."
             return false
         }
         attachments.append(item)
@@ -308,6 +312,9 @@ public final class PostingViewModel: ObservableObject {
             }
 
             self.submissionSuccess = result
+            if let postNum = result.targetID {
+                UserPostTracker.shared.recordOwnPost(board: board, num: postNum)
+            }
             self.clearDraft()
             await apiClient.invalidateThreadCache(board: board, threadNum: threadNum ?? (result.targetID ?? 0))
             await apiClient.invalidateCatalogCache(board: board)
@@ -453,7 +460,7 @@ public struct PostingSheet: View {
             ) { result in
                 handleFileImporterResult(result)
             }
-            .onChange(of: selectedPhotosItems) { newItems in
+            .onValueChange(of: selectedPhotosItems) { newItems in
                 handlePhotosSelection(newItems)
             }
             .task {
@@ -597,8 +604,8 @@ public struct PostingSheet: View {
                     wrapSelection("_", "_")
                 }
 
-                markupButton(label: "^H", hint: "Зачеркивание") {
-                    wrapSelection("^H^H", "")
+                markupButton(label: "~S~", hint: "Зачеркивание") {
+                    wrapSelection("<s>", "</s>")
                 }
             }
             .padding(.vertical, 2)
@@ -631,7 +638,12 @@ public struct PostingSheet: View {
     }
 
     private func wrapSelection(_ leading: String, _ trailing: String) {
-        viewModel.comment += "\(leading)текст\(trailing)"
+        if viewModel.comment.isEmpty {
+            viewModel.comment = "\(leading)\(trailing)"
+        } else {
+            let needsSpace = !viewModel.comment.hasSuffix(" ") && !viewModel.comment.hasSuffix("\n")
+            viewModel.comment += (needsSpace ? " " : "") + "\(leading)\(trailing)"
+        }
     }
 
     // MARK: - Media Attachments Section
@@ -963,22 +975,7 @@ public struct PostingSheet: View {
     }
 
     private static func sanitizeAndConvertMedia(rawData: Data, isVideo: Bool, rawExtension: String) -> (data: Data, ext: String, mime: String) {
-        if isVideo {
-            let ext = ["mov", "m4v"].contains(rawExtension.lowercased()) ? "mp4" : rawExtension.lowercased()
-            let mime = ext == "webm" ? "video/webm" : "video/mp4"
-            return (rawData, ext, mime)
-        } else {
-            // Preserve animated GIF
-            if rawData.count >= 6, let header = String(data: rawData.prefix(6), encoding: .ascii), header.hasPrefix("GIF") {
-                return (rawData, "gif", "image/gif")
-            }
-            // Strip all EXIF / GPS location data and convert HEIC/PNG/WebP to clean JPEG
-            if let image = UIImage(data: rawData),
-               let sanitizedJPEG = image.jpegData(compressionQuality: 0.88) {
-                return (sanitizedJPEG, "jpg", "image/jpeg")
-            }
-            return (rawData, "jpg", "image/jpeg")
-        }
+        return MediaTranscoder.sanitizeMedia(rawData: rawData, isVideo: isVideo, rawExtension: rawExtension)
     }
 
     private func handlePhotosSelection(_ items: [PhotosPickerItem]) {

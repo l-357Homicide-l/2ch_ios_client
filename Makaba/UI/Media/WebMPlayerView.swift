@@ -99,16 +99,31 @@ public final class WebMPlayerModel: ObservableObject {
     var onLoopCommand: ((Bool) -> Void)?
     var onVolumeCommand: ((Float) -> Void)?
     var onReloadCommand: (() -> Void)?
+    var onPiPCommand: (() -> Void)?
 
     private var wasPlayingBeforeScrub: Bool = false
+    private var isAudioActive: Bool = false
+
+    private func updateAudioSessionState() {
+        let shouldBeActive = isPlaying && !isMuted
+        if shouldBeActive && !isAudioActive {
+            AudioSessionManager.shared.activatePlayback()
+            isAudioActive = true
+        } else if !shouldBeActive && isAudioActive {
+            AudioSessionManager.shared.deactivatePlayback()
+            isAudioActive = false
+        }
+    }
+
+    deinit {
+        if isAudioActive {
+            AudioSessionManager.shared.deactivatePlayback()
+            isAudioActive = false
+        }
+    }
 
     public static func configureAudioSession() {
-        do {
-            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback, options: [.duckOthers])
-            try AVAudioSession.sharedInstance().setActive(true)
-        } catch {
-            // Non-fatal if audio session is restricted or cannot be activated
-        }
+        AudioSessionManager.shared.activatePlayback()
     }
 
     public init(
@@ -120,9 +135,6 @@ public final class WebMPlayerModel: ObservableObject {
         self.videoURL = url
         self.autoPlay = autoPlay
         self.isLooping = isLooping
-
-        // Configure system audio session for video playback even when silent switch is on
-        Self.configureAudioSession()
 
         // Auto-detect optimal engine based on file format & capabilities
         if initialEngine == .auto {
@@ -145,15 +157,16 @@ public final class WebMPlayerModel: ObservableObject {
 
     public func play() {
         guard !isScrubbing else { return }
-        Self.configureAudioSession()
         isPlaying = true
         playbackState = .playing
+        updateAudioSessionState()
         onPlayCommand?()
     }
 
     public func pause() {
         isPlaying = false
         playbackState = .paused
+        updateAudioSessionState()
         onPauseCommand?()
     }
 
@@ -191,6 +204,7 @@ public final class WebMPlayerModel: ObservableObject {
 
     public func setMuted(_ muted: Bool) {
         isMuted = muted
+        updateAudioSessionState()
         onMuteCommand?(muted)
     }
 
@@ -205,6 +219,10 @@ public final class WebMPlayerModel: ObservableObject {
 
     public func toggleLoop() {
         setLooping(!isLooping)
+    }
+
+    public func togglePictureInPicture() {
+        onPiPCommand?()
     }
 
     public func switchEngine(to engine: PlayerEngineType) {
@@ -237,6 +255,7 @@ public final class WebMPlayerModel: ObservableObject {
         onLoopCommand = nil
         onVolumeCommand = nil
         onReloadCommand = nil
+        onPiPCommand = nil
     }
 
     // MARK: - Engine Callbacks
@@ -324,9 +343,11 @@ public struct WebKitPlayerBridgeView: UIViewRepresentable {
 
     public static func dismantleUIView(_ uiView: WKWebView, coordinator: Coordinator) {
         coordinator.cleanup()
-        uiView.configuration.userContentController.removeScriptMessageHandler(forName: "playerBridge")
         uiView.stopLoading()
+        uiView.configuration.userContentController.removeScriptMessageHandler(forName: "playerBridge")
         uiView.navigationDelegate = nil
+        // Direct load of empty document synchronously stops WebProcess media threads and releases video decoders immediately
+        uiView.loadHTMLString("<!DOCTYPE html><html><head></head><body></body></html>", baseURL: nil)
     }
 
     // MARK: - Coordinator & Script Message Handler
@@ -372,6 +393,21 @@ public struct WebKitPlayerBridgeView: UIViewRepresentable {
             model?.onReloadCommand = { [weak self] in
                 self?.loadVideo()
             }
+
+            model?.onPiPCommand = { [weak self] in
+                let js = """
+                (function() {
+                    const v = document.querySelector('video');
+                    if (!v) return;
+                    if (document.pictureInPictureElement) {
+                        document.exitPictureInPicture();
+                    } else if (v.requestPictureInPicture) {
+                        v.requestPictureInPicture();
+                    }
+                })();
+                """
+                self?.evaluateJS(js)
+            }
         }
 
         func loadVideo() {
@@ -386,7 +422,25 @@ public struct WebKitPlayerBridgeView: UIViewRepresentable {
             )
 
             isPageLoaded = false
-            webView.loadHTMLString(htmlContent, baseURL: DomainConfigurationService.shared.baseURL)
+            let baseURL = DomainConfigurationService.shared.baseURL
+            let cookieStore = webView.configuration.websiteDataStore.httpCookieStore
+            let cookies = HTTPCookieStorage.shared.cookies ?? []
+
+            guard !cookies.isEmpty else {
+                webView.loadHTMLString(htmlContent, baseURL: baseURL)
+                return
+            }
+
+            let group = DispatchGroup()
+            for cookie in cookies {
+                group.enter()
+                cookieStore.setCookie(cookie) {
+                    group.leave()
+                }
+            }
+            group.notify(queue: .main) { [weak webView] in
+                webView?.loadHTMLString(htmlContent, baseURL: baseURL)
+            }
         }
 
         public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -1009,6 +1063,18 @@ public struct WebMControlsOverlay: View {
                         .background(model.isMuted ? Color.red.opacity(0.2) : Color.clear)
                         .clipShape(Circle())
                 }
+
+                // Picture-in-Picture Toggle Button
+                Button {
+                    model.togglePictureInPicture()
+                } label: {
+                    Image(systemName: "pip.enter")
+                        .font(.headline)
+                        .foregroundColor(.white.opacity(0.85))
+                        .padding(6)
+                        .background(Color.white.opacity(0.15))
+                        .clipShape(Circle())
+                }
             }
         }
         .padding(.horizontal, 16)
@@ -1183,13 +1249,13 @@ public struct WebMPlayerView: View {
         .onDisappear {
             model.pause()
         }
-        .onChange(of: isActive) { active in
+        .onValueChange(of: isActive) { active in
             if !active {
                 model.pause()
             } else if autoPlay {
                 model.play()
             }
         }
-        .onChange(of: autoPlay) { model.autoPlay = $0 }
+        .onValueChange(of: autoPlay) { model.autoPlay = $0 }
     }
 }

@@ -54,7 +54,14 @@ public final class DomainConfigurationService: ObservableObject, @unchecked Send
     private init() {
         let storedDomain = UserDefaults.standard.string(forKey: userDefaultsKey)
         let storedCustom = UserDefaults.standard.stringArray(forKey: customMirrorsKey) ?? []
-        let storedPasscode = UserDefaults.standard.string(forKey: passcodeKey)
+
+        // Migrate legacy UserDefaults passcode to secure Keychain
+        if let legacy = UserDefaults.standard.string(forKey: passcodeKey), !legacy.isEmpty {
+            if KeychainService.savePasscode(legacy) {
+                UserDefaults.standard.removeObject(forKey: passcodeKey)
+            }
+        }
+        let storedPasscode = KeychainService.loadPasscode()
 
         self.internalCustomMirrors = storedCustom
         self.customMirrors = storedCustom
@@ -111,17 +118,17 @@ public final class DomainConfigurationService: ObservableObject, @unchecked Send
     public func setDomain(_ newDomain: String) {
         lock.lock()
         let clean = newDomain.trimmingCharacters(in: .whitespacesAndNewlines)
-        let normalized = clean.hasPrefix("http") ? clean : "https://\(clean)"
+        let normalized = (clean.hasPrefix("http://") || clean.hasPrefix("https://")) ? clean : "https://\(clean)"
         guard _domain != normalized else {
             lock.unlock()
             return
         }
         _domain = normalized
         UserDefaults.standard.set(normalized, forKey: userDefaultsKey)
-        self.activeDomain = normalized
         lock.unlock()
 
         DispatchQueue.main.async {
+            self.activeDomain = normalized
             NotificationCenter.default.post(
                 name: .makabaDomainDidChange,
                 object: normalized
@@ -136,7 +143,7 @@ public final class DomainConfigurationService: ObservableObject, @unchecked Send
         guard !clean.isEmpty else {
             return (false, "Домен не может быть пустым.")
         }
-        let normalized = clean.hasPrefix("http") ? clean : "https://\(clean)"
+        let normalized = (clean.hasPrefix("http://") || clean.hasPrefix("https://")) ? clean : "https://\(clean)"
         guard let url = URL(string: normalized), url.host != nil else {
             return (false, "Некорректный URL зеркала.")
         }
@@ -147,10 +154,10 @@ public final class DomainConfigurationService: ObservableObject, @unchecked Send
             UserDefaults.standard.set(internalCustomMirrors, forKey: customMirrorsKey)
         }
         let updated = internalCustomMirrors
-        self.customMirrors = updated
         lock.unlock()
 
         DispatchQueue.main.async {
+            self.customMirrors = updated
             NotificationCenter.default.post(
                 name: .makabaDomainDidChange,
                 object: normalized
@@ -165,9 +172,12 @@ public final class DomainConfigurationService: ObservableObject, @unchecked Send
         internalCustomMirrors.removeAll { $0 == mirror }
         UserDefaults.standard.set(internalCustomMirrors, forKey: customMirrorsKey)
         let updated = internalCustomMirrors
-        self.customMirrors = updated
         let isCurrent = (_domain == mirror)
         lock.unlock()
+
+        DispatchQueue.main.async {
+            self.customMirrors = updated
+        }
 
         if isCurrent {
             setDomain(Self.defaultDomain)
@@ -182,14 +192,15 @@ public final class DomainConfigurationService: ObservableObject, @unchecked Send
         lock.lock()
         internalPasscodeToken = finalToken
         if let t = finalToken {
-            UserDefaults.standard.set(t, forKey: passcodeKey)
+            KeychainService.savePasscode(t)
         } else {
-            UserDefaults.standard.removeObject(forKey: passcodeKey)
+            KeychainService.deletePasscode()
         }
-        self.passcodeToken = finalToken
+        UserDefaults.standard.removeObject(forKey: passcodeKey)
         lock.unlock()
 
         DispatchQueue.main.async {
+            self.passcodeToken = finalToken
             NotificationCenter.default.post(
                 name: .makabaPasscodeDidChange,
                 object: finalToken
@@ -208,10 +219,10 @@ public final class DomainConfigurationService: ObservableObject, @unchecked Send
         let nextMirror = pool[nextIndex]
         _domain = nextMirror
         UserDefaults.standard.set(nextMirror, forKey: userDefaultsKey)
-        self.activeDomain = nextMirror
         lock.unlock()
 
         DispatchQueue.main.async {
+            self.activeDomain = nextMirror
             NotificationCenter.default.post(
                 name: .makabaDomainDidChange,
                 object: nextMirror

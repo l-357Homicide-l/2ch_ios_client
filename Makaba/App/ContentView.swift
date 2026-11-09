@@ -31,6 +31,7 @@ public struct ContentView: View {
                 NavigationStack {
                     if let board = selectedBoard {
                         CatalogView(board: board)
+                            .id(board.id)
                     } else {
                         emptySelectionView
                     }

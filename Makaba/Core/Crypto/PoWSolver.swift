@@ -161,7 +161,7 @@ public final class PoWSolver: Sendable {
                 }
             }
 
-            for await result in group {
+            for try await result in group {
                 if let (nonce, hex) = result {
                     group.cancelAll()
                     let durationMs = (CFAbsoluteTimeGetCurrent() - startTime) * 1000.0

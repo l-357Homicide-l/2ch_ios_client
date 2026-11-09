@@ -73,20 +73,20 @@ public actor ThreadWatchService {
 
         for (key, var thread) in watchedThreads {
             do {
-                let response = try await MakabaAPIClient.shared.fetchThreadAfter(
+                let newPosts = try await MakabaAPIClient.shared.fetchThreadAfter(
                     board: thread.board,
-                    thread: thread.threadNum,
-                    after: thread.lastSeenPostNum
+                    threadNum: thread.threadNum,
+                    lastNum: thread.lastSeenPostNum
                 )
 
-                let newPosts = response.posts.filter { $0.num > thread.lastSeenPostNum }
-                if !newPosts.isEmpty {
-                    thread.unreadCount += newPosts.count
-                    if let highestNum = newPosts.map(\.num).max() {
+                let freshPosts = newPosts.filter { $0.num > thread.lastSeenPostNum }
+                if !freshPosts.isEmpty {
+                    thread.unreadCount += freshPosts.count
+                    if let highestNum = freshPosts.map({ $0.num }).max() {
                         thread.lastSeenPostNum = highestNum
                     }
-                    totalNewReplies += newPosts.count
-                    sendNotification(for: thread, newCount: newPosts.count)
+                    totalNewReplies += freshPosts.count
+                    sendNotification(for: thread, newCount: freshPosts.count)
                 }
 
                 thread.lastCheckedAt = Date()

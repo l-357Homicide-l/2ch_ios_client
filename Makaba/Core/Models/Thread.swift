@@ -160,7 +160,7 @@ public struct ThreadListItem: Codable, Identifiable, Hashable, Sendable {
         postsCount: Int = 0,
         filesCount: Int? = 0,
         views: Int? = 0,
-        score: Int? = 0
+        score: Double? = 0.0
     ) {
         self.num = num
         self.subject = subject

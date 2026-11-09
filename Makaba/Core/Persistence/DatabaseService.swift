@@ -35,10 +35,11 @@ public struct DraftEntry: Identifiable, Sendable {
     public let updatedAt: Date
 }
 
-/// Actor-isolated thread-safe SQLite database service.
-public actor DatabaseService {
+/// Thread-safe SQLite database service protected by an internal recursive lock.
+public final class DatabaseService: @unchecked Sendable {
     public static let shared = DatabaseService()
 
+    private let lock = NSRecursiveLock()
     private var db: OpaquePointer?
     private let dbPath: String
 
@@ -60,12 +61,14 @@ public actor DatabaseService {
     }
 
     deinit {
+        lock.lock()
+        defer { lock.unlock() }
         if let db = db {
             sqlite3_close(db)
         }
     }
 
-    nonisolated private func createTables() {
+    private func createTables() {
         let historySQL = """
         CREATE TABLE IF NOT EXISTS thread_history (
             board TEXT NOT NULL,
@@ -104,7 +107,9 @@ public actor DatabaseService {
         executeSimple(draftsSQL)
     }
 
-    nonisolated private func executeSimple(_ sql: String) {
+    private func executeSimple(_ sql: String) {
+        lock.lock()
+        defer { lock.unlock() }
         var errMsg: UnsafeMutablePointer<CChar>?
         sqlite3_exec(db, sql, nil, nil, &errMsg)
         if let errMsg = errMsg {
@@ -115,6 +120,9 @@ public actor DatabaseService {
     // MARK: - Thread History CRUD
 
     public func recordHistory(board: String, threadNum: Int, title: String, lastReadNum: Int) {
+        lock.lock()
+        defer { lock.unlock() }
+
         let sql = """
         INSERT INTO thread_history (board, thread_num, title, last_read_num, updated_at)
         VALUES (?, ?, ?, ?, ?)
@@ -138,6 +146,9 @@ public actor DatabaseService {
     }
 
     public func getHistory(limit: Int = 100) -> [HistoryEntry] {
+        lock.lock()
+        defer { lock.unlock() }
+
         let sql = "SELECT board, thread_num, title, last_read_num, updated_at FROM thread_history ORDER BY updated_at DESC LIMIT ?;"
         var results: [HistoryEntry] = []
         var statement: OpaquePointer?
@@ -168,12 +179,17 @@ public actor DatabaseService {
     }
 
     public func clearHistory() {
+        lock.lock()
+        defer { lock.unlock() }
         executeSimple("DELETE FROM thread_history;")
     }
 
     // MARK: - Favorites CRUD
 
     public func toggleFavorite(board: String, threadNum: Int, title: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+
         if isFavorite(board: board, threadNum: threadNum) {
             removeFavorite(board: board, threadNum: threadNum)
             return false
@@ -184,6 +200,9 @@ public actor DatabaseService {
     }
 
     public func isFavorite(board: String, threadNum: Int) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+
         let sql = "SELECT 1 FROM favorites WHERE board = ? AND thread_num = ? LIMIT 1;"
         var statement: OpaquePointer?
         var exists = false
@@ -200,6 +219,9 @@ public actor DatabaseService {
     }
 
     public func addFavorite(board: String, threadNum: Int, title: String) {
+        lock.lock()
+        defer { lock.unlock() }
+
         let sql = """
         INSERT OR REPLACE INTO favorites (board, thread_num, title, added_at)
         VALUES (?, ?, ?, ?);
@@ -216,6 +238,9 @@ public actor DatabaseService {
     }
 
     public func removeFavorite(board: String, threadNum: Int) {
+        lock.lock()
+        defer { lock.unlock() }
+
         let sql = "DELETE FROM favorites WHERE board = ? AND thread_num = ?;"
         var statement: OpaquePointer?
         if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
@@ -227,6 +252,9 @@ public actor DatabaseService {
     }
 
     public func getFavorites() -> [FavoriteEntry] {
+        lock.lock()
+        defer { lock.unlock() }
+
         let sql = "SELECT board, thread_num, title, added_at FROM favorites ORDER BY added_at DESC;"
         var results: [FavoriteEntry] = []
         var statement: OpaquePointer?
@@ -250,6 +278,9 @@ public actor DatabaseService {
     // MARK: - Post Drafts CRUD
 
     public func saveDraft(board: String, threadNum: Int, comment: String, name: String, email: String) {
+        lock.lock()
+        defer { lock.unlock() }
+
         let sql = """
         INSERT OR REPLACE INTO drafts (board, thread_num, comment, name, email, updated_at)
         VALUES (?, ?, ?, ?, ?, ?);
@@ -268,6 +299,9 @@ public actor DatabaseService {
     }
 
     public func getDraft(board: String, threadNum: Int) -> DraftEntry? {
+        lock.lock()
+        defer { lock.unlock() }
+
         let sql = "SELECT comment, name, email, updated_at FROM drafts WHERE board = ? AND thread_num = ? LIMIT 1;"
         var statement: OpaquePointer?
         var result: DraftEntry? = nil
@@ -293,6 +327,9 @@ public actor DatabaseService {
     }
 
     public func deleteDraft(board: String, threadNum: Int) {
+        lock.lock()
+        defer { lock.unlock() }
+
         let sql = "DELETE FROM drafts WHERE board = ? AND thread_num = ?;"
         var statement: OpaquePointer?
         if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {

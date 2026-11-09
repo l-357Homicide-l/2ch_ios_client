@@ -33,7 +33,7 @@ public final class ThreadViewModel: ObservableObject {
     @Published public var parsedComments: [Int: AttributedString] = [:]
 
     /// Associated board model when loaded.
-    public var board: Board? { threadResponse?.board }
+    @Published public var board: Board? = nil
 
     /// Whether this thread was retrieved from the 2ch archive (read-only).
     @Published public var isArchived: Bool = false

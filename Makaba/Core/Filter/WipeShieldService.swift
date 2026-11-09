@@ -104,7 +104,7 @@ public final class WipeShieldService: @unchecked Sendable {
 
         // 2. Keyword check against comment text and subject
         let lowerComment = post.comment.lowercased()
-        let lowerSubject = post.subject.lowercased()
+        let lowerSubject = (post.subject ?? "").lowercased()
 
         for kw in keywords {
             if lowerComment.contains(kw) || lowerSubject.contains(kw) {

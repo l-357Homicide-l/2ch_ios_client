@@ -830,11 +830,7 @@ public struct PostingSheet: View {
 
     private var captchaSection: some View {
         EmojiCaptchaView(
-            viewModel: viewModel.captchaViewModel,
-            verifiedToken: $viewModel.verifiedCaptchaToken,
-            powNonce: $viewModel.powNonce,
-            captchaType: $viewModel.captchaType,
-            isSolved: $viewModel.isCaptchaSolved
+            viewModel: viewModel.captchaViewModel
         )
     }
 

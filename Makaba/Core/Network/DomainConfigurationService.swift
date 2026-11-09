@@ -199,12 +199,20 @@ public final class DomainConfigurationService: ObservableObject, @unchecked Send
         UserDefaults.standard.removeObject(forKey: passcodeKey)
         lock.unlock()
 
-        DispatchQueue.main.async {
+        if Thread.isMainThread {
             self.passcodeToken = finalToken
             NotificationCenter.default.post(
                 name: .makabaPasscodeDidChange,
                 object: finalToken
             )
+        } else {
+            DispatchQueue.main.async {
+                self.passcodeToken = finalToken
+                NotificationCenter.default.post(
+                    name: .makabaPasscodeDidChange,
+                    object: finalToken
+                )
+            }
         }
     }
 

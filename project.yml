@@ -22,22 +22,6 @@ targets:
     sources:
       - path: Makaba
     dependencies:
-      - framework: SwiftUI.framework
-        implicit: true
-      - framework: AVFoundation.framework
-        implicit: true
-      - framework: WebKit.framework
-        implicit: true
-      - framework: CryptoKit.framework
-        implicit: true
-      - framework: PhotosUI.framework
-        implicit: true
-      - framework: UniformTypeIdentifiers.framework
-        implicit: true
-      - framework: Combine.framework
-        implicit: true
-      - framework: UserNotifications.framework
-        implicit: true
       - sdk: libsqlite3.tbd
     settings:
       base:

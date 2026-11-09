@@ -22,12 +22,15 @@ public struct ContentView: View {
             NavigationSplitView {
                 BoardListView(selectedBoard: $selectedBoard)
             } detail: {
-                if let board = selectedBoard {
-                    NavigationStack {
+                NavigationStack {
+                    if let board = selectedBoard {
                         CatalogView(board: board)
+                    } else {
+                        emptySelectionView
                     }
-                } else {
-                    emptySelectionView
+                }
+                .navigationDestination(for: Board.self) { board in
+                    CatalogView(board: board)
                 }
             }
         } else {

@@ -225,12 +225,22 @@ public struct Board: Codable, Identifiable, Hashable, Sendable {
     }
     /// Known boards permanently removed or returning HTTP 500 on 2ch.org.
     public static let defunctBoardIDs: Set<String> = [
-        "fur", "vn", "ho", "h", "r34", "hg", "by", "e", "ruvn", "fet", "kz", "nf"
+        "fur", "vn", "ho", "h", "r34", "hg", "e", "ruvn", "fet", "nf"
     ]
 
     /// Whether this board is permanently defunct on 2ch.org.
     public var isDefunct: Bool {
         Self.defunctBoardIDs.contains(id.lowercased())
+    }
+
+    // MARK: - Equatable & Hashable Identity
+
+    public static func == (lhs: Board, rhs: Board) -> Bool {
+        lhs.id.caseInsensitiveCompare(rhs.id) == .orderedSame
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(id.lowercased())
     }
 }
 

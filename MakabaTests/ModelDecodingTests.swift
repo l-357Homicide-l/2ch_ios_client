@@ -144,6 +144,32 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(absoluteIcon.iconURL?.absoluteString, "https://static.2ch.org/icon.png")
     }
 
+    func test_board_equatableAndHashable_identifiesByLowercasedID() {
+        let board1 = Board(id: "mlp", name: "My Little Pony", category: "Тематика", bumpLimit: 500)
+        let board2 = Board(id: "MLP", name: "Pony", category: "Другое", bumpLimit: 1000)
+        let board3 = Board(id: "b", name: "Бред", category: "Разное", bumpLimit: 500)
+
+        XCTAssertEqual(board1, board2)
+        XCTAssertNotEqual(board1, board3)
+
+        var set = Set<Board>()
+        set.insert(board1)
+        XCTAssertTrue(set.contains(board2))
+        XCTAssertFalse(set.contains(board3))
+    }
+
+    func test_board_defunctStatus_identifiesArchivedBoardsCorrectly() {
+        let defunctBoard = Board(id: "r34", name: "Rule 34", category: "Взрослым", bumpLimit: 500)
+        let activeBoard1 = Board(id: "b", name: "Бред", category: "Разное", bumpLimit: 500)
+        let activeBoard2 = Board(id: "by", name: "Беларусь", category: "Тематика", bumpLimit: 500)
+        let activeBoard3 = Board(id: "kz", name: "Казахстан", category: "Тематика", bumpLimit: 500)
+
+        XCTAssertTrue(defunctBoard.isDefunct)
+        XCTAssertFalse(activeBoard1.isDefunct)
+        XCTAssertFalse(activeBoard2.isDefunct)
+        XCTAssertFalse(activeBoard3.isDefunct)
+    }
+
     func test_boardCategory_groupByCategory_preservesCanonicalOrder() {
         let boards = [
             Board(id: "vg", name: "Видеоигры", category: "Игры", bumpLimit: 500),

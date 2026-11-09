@@ -291,7 +291,7 @@ public struct BoardListView: View {
     // MARK: - Subviews
 
     private var boardsList: some View {
-        List {
+        List(selection: $selectedBoard) {
             // Favorites Section (shown when not searching)
             if viewModel.searchText.isEmpty && !favoriteBoards.isEmpty {
                 Section {
@@ -301,9 +301,7 @@ public struct BoardListView: View {
                                 favoritesManager.toggleFavorite(boardId: board.id)
                             }
                         }
-                        .simultaneousGesture(TapGesture().onEnded {
-                            selectedBoard = board
-                        })
+                        .tag(board)
                     }
                 } header: {
                     Label("Избранные доски", systemImage: "star.fill")
@@ -324,9 +322,7 @@ public struct BoardListView: View {
                                 favoritesManager.toggleFavorite(boardId: board.id)
                             }
                         }
-                        .simultaneousGesture(TapGesture().onEnded {
-                            selectedBoard = board
-                        })
+                        .tag(board)
                     }
                 }
             }
@@ -456,10 +452,13 @@ public struct BoardRowView: View {
                 Image(systemName: isFavorite ? "star.fill" : "star")
                     .foregroundColor(isFavorite ? .orange : .secondary.opacity(0.4))
                     .font(.system(size: 18))
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.borderless)
         }
         .padding(.vertical, 4)
+        .contentShape(Rectangle())
     }
 
     private func cleanInfoText(_ text: String) -> String {

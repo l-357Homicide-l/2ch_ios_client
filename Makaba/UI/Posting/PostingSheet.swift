@@ -302,9 +302,6 @@ public final class PostingViewModel: ObservableObject {
 
             // If server returned non-throwing result with error code -5 (captcha error / expired)
             if !result.isSuccess, let code = result.error?.code, code == -5 {
-                self.isCaptchaSolved = false
-                self.verifiedCaptchaToken = nil
-                self.powNonce = nil
                 self.captchaViewModel.refresh()
                 self.errorMessage = result.errorMessage ?? "Ошибка капчи (код -5). Пройдите капчу заново."
                 self.isSubmitting = false
@@ -326,9 +323,6 @@ public final class PostingViewModel: ObservableObject {
 
             if case .serverError(let code, _) = apiError, code == -5 {
                 // Captcha error or expired: reset solved state and refresh captcha
-                self.isCaptchaSolved = false
-                self.verifiedCaptchaToken = nil
-                self.powNonce = nil
                 self.captchaViewModel.refresh()
             }
             return nil

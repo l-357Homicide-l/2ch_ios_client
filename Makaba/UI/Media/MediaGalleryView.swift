@@ -247,7 +247,7 @@ public struct MediaGalleryView: View {
                 let (data, response) = try await URLSession.shared.data(from: url)
                 guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
                     let code = (response as? HTTPURLResponse)?.statusCode ?? 500
-                    throw MakabaAPIError.serverError(statusCode: code)
+                    throw MakabaAPIError.serverError(code: code, message: "HTTP \(code)")
                 }
 
                 let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
@@ -303,7 +303,7 @@ public struct MediaGalleryView: View {
                 let (tempDownloadURL, response) = try await URLSession.shared.download(from: url)
                 guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
                     let code = (response as? HTTPURLResponse)?.statusCode ?? 500
-                    throw MakabaAPIError.serverError(statusCode: code)
+                    throw MakabaAPIError.serverError(code: code, message: "HTTP \(code)")
                 }
 
                 let tempDir = FileManager.default.temporaryDirectory

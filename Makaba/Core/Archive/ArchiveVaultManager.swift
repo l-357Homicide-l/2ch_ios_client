@@ -98,7 +98,8 @@ public actor ArchiveVaultManager {
                    let decoded = try? JSONDecoder().decode(ThreadResponse.self, from: data) {
                     count = decoded.posts.count
                     if let first = decoded.posts.first {
-                        title = first.displaySubject.isEmpty ? first.cleanComment.prefix(40).description : first.displaySubject
+                        let plain = MakabaHTMLParser.toPlainText(html: first.comment)
+                        title = first.displaySubject.isEmpty ? (plain.isEmpty ? "Тред #\(threadNum)" : String(plain.prefix(40))) : first.displaySubject
                     }
                 }
 

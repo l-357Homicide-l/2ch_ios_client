@@ -81,7 +81,7 @@ public struct CatalogThreadItem: Codable, Identifiable, Hashable, Sendable {
         email: String? = nil,
         tags: String? = nil,
         files: [MediaFile] = [],
-        score: Int? = 0
+        score: Double? = 0.0
     ) {
         self.num = num
         self.parent = parent

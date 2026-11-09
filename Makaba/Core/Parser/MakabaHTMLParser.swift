@@ -201,7 +201,7 @@ public final class MakabaHTMLParser: Sendable {
 
                     if tagEnd < count {
                         let tagContent = String(chars[tagStart..<tagEnd]).trimmingCharacters(in: .whitespaces)
-                        handleTag(tagContent, stateStack: &stateStack, result: &result)
+                        handleTag(tagContent, stateStack: &stateStack, result: &result, spoilerCounter: &spoilerCounter)
                         i = tagEnd + 1
                         continue
                     }
@@ -253,7 +253,8 @@ public final class MakabaHTMLParser: Sendable {
     private static func handleTag(
         _ tag: String,
         stateStack: inout [StyleState],
-        result: inout AttributedString
+        result: inout AttributedString,
+        spoilerCounter: inout Int
     ) {
         // Milestone 2 Remediation: Skip HTML comments completely without modifying stateStack
         if tag.hasPrefix("!--") {

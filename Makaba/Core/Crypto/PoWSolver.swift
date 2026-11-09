@@ -135,7 +135,7 @@ public final class PoWSolver: Sendable {
         let startTime = CFAbsoluteTimeGetCurrent()
         let coreCount = max(1, ProcessInfo.processInfo.activeProcessorCount)
 
-        return try await withTaskGroup(of: (Int, String)?.self) { group in
+        return try await withThrowingTaskGroup(of: (Int, String)?.self) { group in
             for workerIndex in 0..<coreCount {
                 group.addTask {
                     var nonce = workerIndex

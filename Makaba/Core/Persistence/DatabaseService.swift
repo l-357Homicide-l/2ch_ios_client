@@ -65,7 +65,7 @@ public actor DatabaseService {
         }
     }
 
-    private func createTables() {
+    nonisolated private func createTables() {
         let historySQL = """
         CREATE TABLE IF NOT EXISTS thread_history (
             board TEXT NOT NULL,
@@ -104,7 +104,7 @@ public actor DatabaseService {
         executeSimple(draftsSQL)
     }
 
-    private func executeSimple(_ sql: String) {
+    nonisolated private func executeSimple(_ sql: String) {
         var errMsg: UnsafeMutablePointer<CChar>?
         sqlite3_exec(db, sql, nil, nil, &errMsg)
         if let errMsg = errMsg {

@@ -203,13 +203,6 @@ public final class CatalogViewModel: ObservableObject {
                 }
                 return ($0.score ?? 0.0) > ($1.score ?? 0.0)
             }
-        case .score:
-            result.sort {
-                if $0.isPinned != $1.isPinned {
-                    return $0.isPinned && !$1.isPinned
-                }
-                return ($0.score ?? 0) > ($1.score ?? 0)
-            }
         case .newest:
             result.sort {
                 if $0.isPinned != $1.isPinned {

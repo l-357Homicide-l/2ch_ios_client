@@ -47,8 +47,8 @@ public struct PostRowView: View {
             // Header Bar
             headerView
 
-            // Optional Subject Line
-            if !post.displaySubject.isEmpty {
+            // Optional Subject Line (hidden on OP post since opThreadHeaderView displays it, and hidden if comment duplicates it)
+            if shouldShowSubject {
                 Text(post.displaySubject)
                     .font(.headline.weight(.bold))
                     .foregroundColor(.primary)
@@ -213,6 +213,19 @@ public struct PostRowView: View {
             return Color.orange.opacity(0.04)
         }
         return Color(UIColor.secondarySystemGroupedBackground)
+    }
+
+    private var shouldShowSubject: Bool {
+        // OP subject is already displayed prominently in opThreadHeaderView at the top of the thread
+        if isOPPost { return false }
+        let subj = post.displaySubject.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !subj.isEmpty else { return false }
+        // If the post body itself begins with the subject text, avoid confusing the reader with duplicate lines
+        let plainComment = MakabaHTMLParser.toPlainText(html: post.comment).trimmingCharacters(in: .whitespacesAndNewlines)
+        if plainComment.hasPrefix(subj) {
+            return false
+        }
+        return true
     }
 
     // MARK: - Attachments View

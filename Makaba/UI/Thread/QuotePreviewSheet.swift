@@ -33,6 +33,13 @@ public struct QuotePreviewSheet: View {
         postHistory.last ?? initialPost
     }
 
+    private var shouldShowSubject: Bool {
+        let subj = currentPost.displaySubject.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !subj.isEmpty else { return false }
+        let plainComment = MakabaHTMLParser.toPlainText(html: currentPost.comment).trimmingCharacters(in: .whitespacesAndNewlines)
+        return !plainComment.hasPrefix(subj)
+    }
+
     public var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
@@ -41,8 +48,8 @@ public struct QuotePreviewSheet: View {
                         // Header: Post Number, Author, Badges, Date
                         headerView
 
-                        // Subject if present
-                        if !currentPost.displaySubject.isEmpty {
+                        // Subject if present and not duplicated in comment body
+                        if shouldShowSubject {
                             Text(currentPost.displaySubject)
                                 .font(.headline.weight(.bold))
                                 .foregroundColor(.primary)

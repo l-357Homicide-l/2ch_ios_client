@@ -20,6 +20,7 @@ public struct MediaGalleryView: View {
     @State private var showOverlay: Bool = true
     @State private var saveAlertMessage: String? = nil
     @State private var isShowingSaveAlert: Bool = false
+    @State private var isSavingMedia: Bool = false
     @State private var activeImageSaver: ImageSaver? = nil
 
     public init(files: [MediaFile], initialIndex: Int = 0) {
@@ -57,6 +58,9 @@ public struct MediaGalleryView: View {
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
+            .onAppear {
+                currentIndex = initialIndex
+            }
 
             // Metadata & Controls Overlay
             if showOverlay {
@@ -69,7 +73,7 @@ public struct MediaGalleryView: View {
             }
         }
         .statusBarHidden(!showOverlay)
-        .alert("Сохранение в Фото", isPresented: $isShowingSaveAlert) {
+        .alert("Сохранение медиа", isPresented: $isShowingSaveAlert) {
             Button("ОК", role: .cancel) { }
         } message: {
             Text(saveAlertMessage ?? "")
@@ -107,15 +111,26 @@ public struct MediaGalleryView: View {
             // Save & Share Actions
             HStack(spacing: 16) {
                 if let file = currentFile {
-                    // Save to Photos (images only)
-                    if file.isImage {
+                    // Save to Photos (images and videos)
+                    if file.isImage || file.isVideo {
                         Button {
-                            saveImageToPhotos(file: file)
+                            if file.isVideo {
+                                saveVideoToPhotos(file: file)
+                            } else {
+                                saveImageToPhotos(file: file)
+                            }
                         } label: {
-                            Image(systemName: "arrow.down.to.line.circle.fill")
-                                .font(.system(size: 26))
-                                .foregroundColor(.white.opacity(0.85))
+                            if isSavingMedia {
+                                ProgressView()
+                                    .tint(.white)
+                                    .scaleEffect(0.9)
+                            } else {
+                                Image(systemName: "arrow.down.to.line.circle.fill")
+                                    .font(.system(size: 26))
+                                    .foregroundColor(.white.opacity(0.85))
+                            }
                         }
+                        .disabled(isSavingMedia)
                     }
 
                     // Share Link
@@ -224,6 +239,70 @@ public struct MediaGalleryView: View {
             }
         }
     }
+
+    // MARK: - Save Video to Photos Action
+
+    private func saveVideoToPhotos(file: MediaFile) {
+        guard let url = file.fullURL else {
+            saveAlertMessage = "Неверный URL видеофайла."
+            isShowingSaveAlert = true
+            return
+        }
+
+        isSavingMedia = true
+
+        Task {
+            do {
+                let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
+                guard status == .authorized || status == .limited else {
+                    await MainActor.run {
+                        self.saveAlertMessage = "Доступ к Фото запрещен. Разрешите доступ в Настройках iOS."
+                        self.isShowingSaveAlert = true
+                        self.isSavingMedia = false
+                    }
+                    return
+                }
+
+                let (tempDownloadURL, _) = try await URLSession.shared.download(from: url)
+                let tempDir = FileManager.default.temporaryDirectory
+                let targetURL = tempDir.appendingPathComponent(url.lastPathComponent)
+                try? FileManager.default.removeItem(at: targetURL)
+                try FileManager.default.moveItem(at: tempDownloadURL, to: targetURL)
+
+                try await PHPhotoLibrary.shared().performChanges {
+                    PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: targetURL)
+                }
+
+                await MainActor.run {
+                    self.saveAlertMessage = "Видео успешно сохранено в Фото."
+                    self.isShowingSaveAlert = true
+                    self.isSavingMedia = false
+                }
+            } catch {
+                // Fallback for WebM on iOS: save to App Documents / Downloads
+                let docDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first ?? FileManager.default.temporaryDirectory
+                let downloadsDir = docDir.appendingPathComponent("Downloads", isDirectory: true)
+                try? FileManager.default.createDirectory(at: downloadsDir, withIntermediateDirectories: true)
+                let localDest = downloadsDir.appendingPathComponent(url.lastPathComponent)
+                try? FileManager.default.removeItem(at: localDest)
+
+                if let (tempDownloadURL, _) = try? await URLSession.shared.download(from: url) {
+                    try? FileManager.default.moveItem(at: tempDownloadURL, to: localDest)
+                    await MainActor.run {
+                        self.saveAlertMessage = "Видео сохранено в папку 'Файлы / Makaba / Downloads' (системная галерея iOS не поддерживает raw WebM напрямую)."
+                        self.isShowingSaveAlert = true
+                        self.isSavingMedia = false
+                    }
+                } else {
+                    await MainActor.run {
+                        self.saveAlertMessage = "Ошибка сохранения видео: \(error.localizedDescription)"
+                        self.isShowingSaveAlert = true
+                        self.isSavingMedia = false
+                    }
+                }
+            }
+        }
+    }
 }
 
 // MARK: - Media Item View (Image / Video Switcher)
@@ -235,6 +314,8 @@ public struct MediaItemView: View {
     public let onDismissGesture: () -> Void
 
     @State private var isNSFWRevealed: Bool
+    @State private var dismissOffset: CGFloat = 0
+    @State private var isZoomed: Bool = false
 
     public init(
         file: MediaFile,
@@ -276,12 +357,42 @@ public struct MediaItemView: View {
                 } else {
                     ZoomableImageView(
                         file: file,
+                        isZoomed: $isZoomed,
                         onSingleTap: onSingleTap,
                         onDismissGesture: onDismissGesture
                     )
                 }
             }
             .blur(radius: (file.nsfw == 1 && !isNSFWRevealed) ? 28 : 0)
+            .offset(y: dismissOffset)
+            .gesture(
+                isZoomed ? nil :
+                DragGesture(minimumDistance: 12)
+                    .onChanged { value in
+                        let dy = value.translation.height
+                        let dx = value.translation.width
+                        // Track predominantly vertical swipe (both UP and DOWN)
+                        if abs(dy) > abs(dx) {
+                            dismissOffset = dy
+                        }
+                    }
+                    .onEnded { value in
+                        let dy = value.translation.height
+                        let dx = value.translation.width
+                        if abs(dy) > abs(dx) && (abs(dy) > 100 || abs(value.predictedEndTranslation.height) > 220) {
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                dismissOffset = dy > 0 ? 1000 : -1000
+                            }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                                onDismissGesture()
+                            }
+                        } else {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                dismissOffset = 0
+                            }
+                        }
+                    }
+            )
 
             // Fullscreen NSFW Shield
             if file.nsfw == 1 && !isNSFWRevealed {
@@ -324,6 +435,7 @@ public struct MediaItemView: View {
 
 public struct ZoomableImageView: View {
     public let file: MediaFile
+    @Binding public var isZoomed: Bool
     public let onSingleTap: () -> Void
     public let onDismissGesture: () -> Void
 
@@ -331,6 +443,18 @@ public struct ZoomableImageView: View {
     @State private var lastScale: CGFloat = 1.0
     @State private var offset: CGSize = .zero
     @State private var lastOffset: CGSize = .zero
+
+    public init(
+        file: MediaFile,
+        isZoomed: Binding<Bool> = .constant(false),
+        onSingleTap: @escaping () -> Void,
+        onDismissGesture: @escaping () -> Void = {}
+    ) {
+        self.file = file
+        self._isZoomed = isZoomed
+        self.onSingleTap = onSingleTap
+        self.onDismissGesture = onDismissGesture
+    }
 
     public var body: some View {
         GeometryReader { proxy in
@@ -396,8 +520,8 @@ public struct ZoomableImageView: View {
                 .highPriorityGesture(dragGesture(proxy: proxy))
                 .gesture(magnificationGesture(proxy: proxy))
         } else {
+            // When not zoomed, do not attach any drag gesture so horizontal paging is unhindered
             content
-                .gesture(dragGesture(proxy: proxy))
                 .gesture(magnificationGesture(proxy: proxy))
         }
     }
@@ -407,14 +531,16 @@ public struct ZoomableImageView: View {
             .onChanged { value in
                 let newScale = lastScale * value
                 scale = min(max(newScale, 1.0), 5.0)
+                isZoomed = scale > 1.01
             }
             .onEnded { _ in
-                if scale <= 1.0 {
+                if scale <= 1.01 {
                     withAnimation(.spring()) {
                         scale = 1.0
                         offset = .zero
                         lastOffset = .zero
                     }
+                    isZoomed = false
                 } else {
                     let maxOffsetX = max(0, (proxy.size.width * (scale - 1)) / 2)
                     let maxOffsetY = max(0, (proxy.size.height * (scale - 1)) / 2)
@@ -425,6 +551,7 @@ public struct ZoomableImageView: View {
                         )
                         lastOffset = offset
                     }
+                    isZoomed = true
                 }
                 lastScale = scale
             }
@@ -480,9 +607,11 @@ public struct ZoomableImageView: View {
                 offset = .zero
                 lastScale = 1.0
                 lastOffset = .zero
+                isZoomed = false
             } else {
                 scale = 2.5
                 lastScale = 2.5
+                isZoomed = true
             }
         }
     }

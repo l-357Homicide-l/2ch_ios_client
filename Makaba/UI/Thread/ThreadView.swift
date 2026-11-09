@@ -137,6 +137,21 @@ public final class ThreadViewModel: ObservableObject {
     }
 }
 
+// MARK: - Active Media Gallery Presentation
+
+public struct ActiveMediaGalleryPresentation: Identifiable, Sendable {
+    public var id: String { "\(index)_\(file.path)" }
+    public let index: Int
+    public let file: MediaFile
+    public let allFiles: [MediaFile]
+
+    public init(index: Int, file: MediaFile, allFiles: [MediaFile]) {
+        self.index = index
+        self.file = file
+        self.allFiles = allFiles
+    }
+}
+
 // MARK: - Thread Active Sheet
 
 private enum ActiveSheet: Identifiable {
@@ -165,8 +180,7 @@ public struct ThreadView: View {
 
     // Unified state for modal sheets & popovers
     @State private var activeSheet: ActiveSheet? = nil
-    @State private var isMediaGalleryPresented: Bool = false
-    @State private var selectedMediaIndex: Int = 0
+    @State private var activeMediaGallery: ActiveMediaGalleryPresentation? = nil
     @State private var showScrollButtons: Bool = true
 
     public init(
@@ -283,11 +297,12 @@ public struct ThreadView: View {
                 }
             }
             // Fullscreen Media Gallery
-            .fullScreenCover(isPresented: $isMediaGalleryPresented) {
+            .fullScreenCover(item: $activeMediaGallery) { gallery in
                 MediaGalleryView(
-                    files: viewModel.allMediaFiles,
-                    initialIndex: selectedMediaIndex
+                    files: gallery.allFiles,
+                    initialIndex: gallery.index
                 )
+                .id(gallery.id)
             }
         }
     }
@@ -321,10 +336,14 @@ public struct ThreadView: View {
                             self.activeSheet = .posting(targetPost)
                         },
                         onMediaTapped: { file in
-                            if let index = viewModel.allMediaFiles.firstIndex(where: { $0.name == file.name }) {
-                                self.selectedMediaIndex = index
-                                self.isMediaGalleryPresented = true
-                            }
+                            let foundIndex = viewModel.allMediaFiles.firstIndex(where: { $0.path == file.path })
+                                ?? viewModel.allMediaFiles.firstIndex(where: { $0.name == file.name })
+                                ?? 0
+                            self.activeMediaGallery = ActiveMediaGalleryPresentation(
+                                index: foundIndex,
+                                file: file,
+                                allFiles: viewModel.allMediaFiles
+                            )
                         }
                     )
                     .id(post.num)

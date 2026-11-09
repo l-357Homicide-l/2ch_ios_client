@@ -18,6 +18,8 @@ public struct MediaGalleryView: View {
 
     @State private var currentIndex: Int
     @State private var showOverlay: Bool = true
+    @State private var dismissOffset: CGFloat = 0
+    @State private var isCurrentItemZoomed: Bool = false
     @State private var saveAlertMessage: String? = nil
     @State private var isShowingSaveAlert: Bool = false
     @State private var isSavingMedia: Bool = false
@@ -36,12 +38,15 @@ public struct MediaGalleryView: View {
 
     public var body: some View {
         ZStack {
-            // Immersive black backdrop
-            Color.black.ignoresSafeArea()
+            // Immersive black backdrop that interactively fades during vertical swipe-to-dismiss
+            Color.black
+                .opacity(Double(1.0 - min(abs(dismissOffset) / 500.0, 0.75)))
+                .ignoresSafeArea()
 
-            // Paging Carousel
+            // Paging Carousel with deterministic sequential integer index identities
             TabView(selection: $currentIndex) {
-                ForEach(Array(files.enumerated()), id: \.element.id) { index, file in
+                ForEach(0..<files.count, id: \.self) { index in
+                    let file = files[index]
                     MediaItemView(
                         file: file,
                         isActive: index == currentIndex,
@@ -50,17 +55,46 @@ public struct MediaGalleryView: View {
                                 showOverlay.toggle()
                             }
                         },
-                        onDismissGesture: {
-                            dismiss()
+                        onZoomChanged: { zoomed in
+                            if index == currentIndex {
+                                isCurrentItemZoomed = zoomed
+                            }
                         }
                     )
                     .tag(index)
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
+            .offset(y: dismissOffset)
             .onAppear {
-                currentIndex = initialIndex
+                if currentIndex != initialIndex {
+                    currentIndex = initialIndex
+                }
             }
+
+            // Directional vertical swipe-to-dismiss engine: yields 100% to horizontal paging gestures
+            AttachVerticalDismissGesture(
+                isEnabled: !isCurrentItemZoomed,
+                onVerticalPan: { dy in
+                    dismissOffset = dy
+                },
+                onEnded: { translationY, velocityY in
+                    if abs(translationY) > 100 || abs(velocityY) > 400 {
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            dismissOffset = translationY > 0 ? 1000 : -1000
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                            dismiss()
+                        }
+                    } else {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                            dismissOffset = 0
+                        }
+                    }
+                }
+            )
+            .frame(width: 0, height: 0)
+            .allowsHitTesting(false)
 
             // Metadata & Controls Overlay
             if showOverlay {
@@ -69,6 +103,7 @@ public struct MediaGalleryView: View {
                     Spacer()
                     bottomOverlayBar
                 }
+                .opacity(Double(1.0 - min(abs(dismissOffset) / 200.0, 1.0)))
                 .transition(.opacity.animation(.easeInOut(duration: 0.2)))
             }
         }
@@ -311,22 +346,21 @@ public struct MediaItemView: View {
     public let file: MediaFile
     public let isActive: Bool
     public let onSingleTap: () -> Void
-    public let onDismissGesture: () -> Void
+    public let onZoomChanged: (Bool) -> Void
 
     @State private var isNSFWRevealed: Bool
-    @State private var dismissOffset: CGFloat = 0
     @State private var isZoomed: Bool = false
 
     public init(
         file: MediaFile,
         isActive: Bool = true,
         onSingleTap: @escaping () -> Void,
-        onDismissGesture: @escaping () -> Void
+        onZoomChanged: @escaping (Bool) -> Void = { _ in }
     ) {
         self.file = file
         self.isActive = isActive
         self.onSingleTap = onSingleTap
-        self.onDismissGesture = onDismissGesture
+        self.onZoomChanged = onZoomChanged
         self._isNSFWRevealed = State(initialValue: file.nsfw != 1)
     }
 
@@ -358,41 +392,14 @@ public struct MediaItemView: View {
                     ZoomableImageView(
                         file: file,
                         isZoomed: $isZoomed,
-                        onSingleTap: onSingleTap,
-                        onDismissGesture: onDismissGesture
+                        onSingleTap: onSingleTap
                     )
                 }
             }
             .blur(radius: (file.nsfw == 1 && !isNSFWRevealed) ? 28 : 0)
-            .offset(y: dismissOffset)
-            .gesture(
-                isZoomed ? nil :
-                DragGesture(minimumDistance: 12)
-                    .onChanged { value in
-                        let dy = value.translation.height
-                        let dx = value.translation.width
-                        // Track predominantly vertical swipe (both UP and DOWN)
-                        if abs(dy) > abs(dx) {
-                            dismissOffset = dy
-                        }
-                    }
-                    .onEnded { value in
-                        let dy = value.translation.height
-                        let dx = value.translation.width
-                        if abs(dy) > abs(dx) && (abs(dy) > 100 || abs(value.predictedEndTranslation.height) > 220) {
-                            withAnimation(.easeOut(duration: 0.2)) {
-                                dismissOffset = dy > 0 ? 1000 : -1000
-                            }
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                                onDismissGesture()
-                            }
-                        } else {
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                                dismissOffset = 0
-                            }
-                        }
-                    }
-            )
+            .onChange(of: isZoomed) { zoomed in
+                onZoomChanged(zoomed)
+            }
 
             // Fullscreen NSFW Shield
             if file.nsfw == 1 && !isNSFWRevealed {
@@ -569,9 +576,6 @@ public struct ZoomableImageView: View {
                         width: min(max(targetX, -maxOffsetX), maxOffsetX),
                         height: min(max(targetY, -maxOffsetY), maxOffsetY)
                     )
-                } else if value.translation.height > 60 {
-                    // Swipe down to dismiss
-                    offset = CGSize(width: 0, height: value.translation.height)
                 }
             }
             .onEnded { value in
@@ -586,15 +590,6 @@ public struct ZoomableImageView: View {
                             height: min(max(targetY, -maxOffsetY), maxOffsetY)
                         )
                         lastOffset = offset
-                    }
-                } else {
-                    if value.translation.height > 120 {
-                        onDismissGesture()
-                    } else {
-                        withAnimation(.spring()) {
-                            offset = .zero
-                            lastOffset = .zero
-                        }
                     }
                 }
             }
@@ -727,5 +722,133 @@ private final class ImageSaver: NSObject {
     ) {
         completion(error == nil, error)
         Self.activeSavers.remove(self)
+    }
+}
+
+// MARK: - Directional Vertical Dismiss Pan Gesture
+
+final class DirectionalPanGestureRecognizer: UIPanGestureRecognizer, UIGestureRecognizerDelegate {
+    override init(target: Any?, action: Selector?) {
+        super.init(target: target, action: action)
+        self.maximumNumberOfTouches = 1
+        self.cancelsTouchesInView = false
+        self.delegate = self
+    }
+
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard let pan = gestureRecognizer as? UIPanGestureRecognizer,
+              let view = pan.view else { return false }
+        let velocity = pan.velocity(in: view)
+        // STRICT DIRECTIONAL FILTER:
+        // Must be predominantly vertical: vertical velocity must exceed horizontal velocity by at least 15%
+        // and velocity must be at least 25 pt/s to avoid accidental jitter.
+        // If horizontal velocity is greater or equal, this recognizer returns false immediately,
+        // leaving the horizontal swipe 100% unimpeded for UIPageViewController / TabView.
+        return abs(velocity.y) > (abs(velocity.x) * 1.15) && abs(velocity.y) > 25
+    }
+
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+        // Allow simultaneous recognition with child taps/gestures
+        return true
+    }
+}
+
+struct AttachVerticalDismissGesture: UIViewRepresentable {
+    let isEnabled: Bool
+    let onVerticalPan: (CGFloat) -> Void
+    let onEnded: (_ translationY: CGFloat, _ velocityY: CGFloat) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onVerticalPan: onVerticalPan, onEnded: onEnded)
+    }
+
+    func makeUIView(context: Context) -> AttachView {
+        let view = AttachView()
+        view.isUserInteractionEnabled = false
+        view.onAttach = { [weak view] in
+            guard let view = view else { return }
+            let targetView = view.parentViewController?.view
+                ?? view.window?.rootViewController?.presentedViewController?.view
+                ?? view.window?.rootViewController?.view
+            if let targetView = targetView {
+                context.coordinator.attach(to: targetView)
+            }
+        }
+        return view
+    }
+
+    func updateUIView(_ uiView: AttachView, context: Context) {
+        context.coordinator.onVerticalPan = onVerticalPan
+        context.coordinator.onEnded = onEnded
+        context.coordinator.panRecognizer?.isEnabled = isEnabled
+    }
+
+    static func dismantleUIView(_ uiView: AttachView, coordinator: Coordinator) {
+        if let pan = coordinator.panRecognizer, let view = pan.view {
+            view.removeGestureRecognizer(pan)
+        }
+    }
+
+    class Coordinator: NSObject {
+        var onVerticalPan: (CGFloat) -> Void
+        var onEnded: (_ translationY: CGFloat, _ velocityY: CGFloat) -> Void
+        weak var panRecognizer: DirectionalPanGestureRecognizer?
+
+        init(
+            onVerticalPan: @escaping (CGFloat) -> Void,
+            onEnded: @escaping (_ translationY: CGFloat, _ velocityY: CGFloat) -> Void
+        ) {
+            self.onVerticalPan = onVerticalPan
+            self.onEnded = onEnded
+        }
+
+        func attach(to view: UIView) {
+            guard panRecognizer == nil else { return }
+            let pan = DirectionalPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
+            view.addGestureRecognizer(pan)
+            self.panRecognizer = pan
+        }
+
+        @objc func handlePan(_ recognizer: UIPanGestureRecognizer) {
+            guard let view = recognizer.view else { return }
+            let translation = recognizer.translation(in: view)
+            let velocity = recognizer.velocity(in: view)
+
+            switch recognizer.state {
+            case .changed:
+                onVerticalPan(translation.y)
+            case .ended, .cancelled:
+                onEnded(translation.y, velocity.y)
+            default:
+                break
+            }
+        }
+    }
+
+    final class AttachView: UIView {
+        var onAttach: (() -> Void)?
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            if window != nil {
+                onAttach?()
+            }
+        }
+    }
+}
+
+private extension UIView {
+    var parentViewController: UIViewController? {
+        var parentResponder: UIResponder? = self.next
+        while let responder = parentResponder {
+            if let viewController = responder as? UIViewController {
+                return viewController
+            }
+            parentResponder = responder.next
+        }
+        return nil
     }
 }

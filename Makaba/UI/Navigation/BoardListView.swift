@@ -121,12 +121,15 @@ public struct BoardListView: View {
 
     /// Optional binding for split-view selection.
     @Binding public var selectedBoard: Board?
+    public var onSelectBoard: ((Board) -> Void)? = nil
 
     public init(
         selectedBoard: Binding<Board?> = .constant(nil),
+        onSelectBoard: ((Board) -> Void)? = nil,
         apiClient: MakabaAPIClient = .shared
     ) {
         self._selectedBoard = selectedBoard
+        self.onSelectBoard = onSelectBoard
         self._viewModel = StateObject(wrappedValue: BoardListViewModel(apiClient: apiClient))
     }
 
@@ -291,17 +294,22 @@ public struct BoardListView: View {
     // MARK: - Subviews
 
     private var boardsList: some View {
-        List(selection: $selectedBoard) {
+        List {
             // Favorites Section (shown when not searching)
             if viewModel.searchText.isEmpty && !favoriteBoards.isEmpty {
                 Section {
                     ForEach(favoriteBoards) { board in
-                        NavigationLink(value: board) {
-                            BoardRowView(board: board, isFavorite: true) {
+                        BoardRowView(
+                            board: board,
+                            isFavorite: true,
+                            onSelect: {
+                                selectedBoard = board
+                                onSelectBoard?(board)
+                            },
+                            onToggleFavorite: {
                                 favoritesManager.toggleFavorite(boardId: board.id)
                             }
-                        }
-                        .tag(board)
+                        )
                     }
                 } header: {
                     Label("Избранные доски", systemImage: "star.fill")
@@ -314,15 +322,17 @@ public struct BoardListView: View {
             ForEach(viewModel.filteredCategories) { category in
                 Section(header: Text(category.name).font(.subheadline.weight(.semibold))) {
                     ForEach(category.boards) { board in
-                        NavigationLink(value: board) {
-                            BoardRowView(
-                                board: board,
-                                isFavorite: favoritesManager.isFavorite(boardId: board.id)
-                            ) {
+                        BoardRowView(
+                            board: board,
+                            isFavorite: favoritesManager.isFavorite(boardId: board.id),
+                            onSelect: {
+                                selectedBoard = board
+                                onSelectBoard?(board)
+                            },
+                            onToggleFavorite: {
                                 favoritesManager.toggleFavorite(boardId: board.id)
                             }
-                        }
-                        .tag(board)
+                        )
                     }
                 }
             }
@@ -373,79 +383,101 @@ public struct BoardListView: View {
     }
 }
 
+// MARK: - Plain Row Button Style
+
+public struct PlainRowButtonStyle: ButtonStyle {
+    public init() {}
+    public func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.6 : 1.0)
+    }
+}
+
 // MARK: - Board Row View
 
 public struct BoardRowView: View {
     public let board: Board
     public let isFavorite: Bool
+    public let onSelect: (() -> Void)?
     public let onToggleFavorite: () -> Void
 
     public init(
         board: Board,
         isFavorite: Bool,
+        onSelect: (() -> Void)? = nil,
         onToggleFavorite: @escaping () -> Void
     ) {
         self.board = board
         self.isFavorite = isFavorite
+        self.onSelect = onSelect
         self.onToggleFavorite = onToggleFavorite
     }
 
     public var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            // Board ID Pill (e.g. /b/)
-            Text("/\(board.id)/")
-                .font(.system(.subheadline, design: .monospaced).weight(.bold))
-                .foregroundColor(.primary)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(Color.orange.opacity(0.15))
-                )
+        HStack(alignment: .center, spacing: 8) {
+            // Main Tappable Board Card Area
+            Button {
+                onSelect?()
+            } label: {
+                HStack(alignment: .center, spacing: 12) {
+                    // Board ID Pill (e.g. /b/)
+                    Text("/\(board.id)/")
+                        .font(.system(.subheadline, design: .monospaced).weight(.bold))
+                        .foregroundColor(.primary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(Color.orange.opacity(0.15))
+                        )
 
-            // Board Name and Metadata
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
-                    Text(board.name)
-                        .font(.body.weight(.medium))
-                        .foregroundColor(board.isDefunct ? .secondary : .primary)
+                    // Board Name and Metadata
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 6) {
+                            Text(board.name)
+                                .font(.body.weight(.medium))
+                                .foregroundColor(board.isDefunct ? .secondary : .primary)
 
-                    if board.isDefunct {
-                        Text("Архив")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundColor(.red)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 2)
-                            .background(Color.red.opacity(0.12))
-                            .clipShape(Capsule())
+                            if board.isDefunct {
+                                Text("Архив")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundColor(.red)
+                                    .padding(.horizontal, 5)
+                                    .padding(.vertical, 2)
+                                    .background(Color.red.opacity(0.12))
+                                    .clipShape(Capsule())
+                            }
+                        }
+
+                        if !board.info.isEmpty {
+                            Text(cleanInfoText(board.info))
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                        }
+
+                        // Capability Metadata Tags
+                        HStack(spacing: 6) {
+                            if board.bumpLimit > 0 {
+                                MetadataTag(label: "Бамп: \(board.bumpLimit)", icon: "arrow.up")
+                            }
+                            if board.enableSage {
+                                MetadataTag(label: "Sage", icon: "arrow.down.right")
+                            }
+                            if board.enableIcons {
+                                MetadataTag(label: "Иконки", icon: "photo")
+                            }
+                        }
+                        .padding(.top, 2)
                     }
+
+                    Spacer(minLength: 4)
                 }
-
-                if !board.info.isEmpty {
-                    Text(cleanInfoText(board.info))
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                }
-
-                // Capability Metadata Tags
-                HStack(spacing: 6) {
-                    if board.bumpLimit > 0 {
-                        MetadataTag(label: "Бамп: \(board.bumpLimit)", icon: "arrow.up")
-                    }
-                    if board.enableSage {
-                        MetadataTag(label: "Sage", icon: "arrow.down.right")
-                    }
-                    if board.enableIcons {
-                        MetadataTag(label: "Иконки", icon: "photo")
-                    }
-                }
-                .padding(.top, 2)
+                .contentShape(Rectangle())
             }
+            .buttonStyle(PlainRowButtonStyle())
 
-            Spacer()
-
-            // Favorite Star Button
+            // Favorite Star Button (strictly isolated hit area)
             Button {
                 onToggleFavorite()
             } label: {
@@ -456,9 +488,20 @@ public struct BoardRowView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.borderless)
+
+            // Chevron Indicator (also triggers onSelect)
+            Button {
+                onSelect?()
+            } label: {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(Color(UIColor.tertiaryLabel))
+                    .frame(width: 24, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
         }
         .padding(.vertical, 4)
-        .contentShape(Rectangle())
     }
 
     private func cleanInfoText(_ text: String) -> String {

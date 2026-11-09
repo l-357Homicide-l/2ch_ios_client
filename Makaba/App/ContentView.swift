@@ -13,6 +13,7 @@ import UIKit
 public struct ContentView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var selectedBoard: Board? = nil
+    @State private var navigationPath = NavigationPath()
 
     public init() {}
 
@@ -20,7 +21,12 @@ public struct ContentView: View {
         if horizontalSizeClass == .regular {
             // iPad / Regular Width: Multi-Column Split View
             NavigationSplitView {
-                BoardListView(selectedBoard: $selectedBoard)
+                BoardListView(
+                    selectedBoard: $selectedBoard,
+                    onSelectBoard: { board in
+                        selectedBoard = board
+                    }
+                )
             } detail: {
                 NavigationStack {
                     if let board = selectedBoard {
@@ -35,11 +41,16 @@ public struct ContentView: View {
             }
         } else {
             // iPhone / Compact Width: Hierarchical Navigation Stack
-            NavigationStack {
-                BoardListView(selectedBoard: $selectedBoard)
-                    .navigationDestination(for: Board.self) { board in
-                        CatalogView(board: board)
+            NavigationStack(path: $navigationPath) {
+                BoardListView(
+                    selectedBoard: $selectedBoard,
+                    onSelectBoard: { board in
+                        navigationPath.append(board)
                     }
+                )
+                .navigationDestination(for: Board.self) { board in
+                    CatalogView(board: board)
+                }
             }
         }
     }

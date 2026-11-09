@@ -110,7 +110,13 @@ public struct CatalogThreadItem: Codable, Identifiable, Hashable, Sendable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
 
-        self.num = try container.decode(Int.self, forKey: .num)
+        if let intNum = try? container.decode(Int.self, forKey: .num) {
+            self.num = intNum
+        } else if let strNum = try? container.decode(String.self, forKey: .num), let parsed = Int(strNum) {
+            self.num = parsed
+        } else {
+            self.num = try container.decode(Int.self, forKey: .num)
+        }
         self.parent = try? container.decode(Int.self, forKey: .parent)
         self.board = try? container.decode(String.self, forKey: .board)
         self.subject = (try? container.decode(String.self, forKey: .subject)) ?? ""

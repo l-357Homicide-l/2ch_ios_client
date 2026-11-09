@@ -127,12 +127,20 @@ public final class DomainConfigurationService: ObservableObject, @unchecked Send
         UserDefaults.standard.set(normalized, forKey: userDefaultsKey)
         lock.unlock()
 
-        DispatchQueue.main.async {
+        if Thread.isMainThread {
             self.activeDomain = normalized
             NotificationCenter.default.post(
                 name: .makabaDomainDidChange,
                 object: normalized
             )
+        } else {
+            DispatchQueue.main.async {
+                self.activeDomain = normalized
+                NotificationCenter.default.post(
+                    name: .makabaDomainDidChange,
+                    object: normalized
+                )
+            }
         }
     }
 
@@ -156,12 +164,20 @@ public final class DomainConfigurationService: ObservableObject, @unchecked Send
         let updated = internalCustomMirrors
         lock.unlock()
 
-        DispatchQueue.main.async {
+        if Thread.isMainThread {
             self.customMirrors = updated
             NotificationCenter.default.post(
                 name: .makabaDomainDidChange,
                 object: normalized
             )
+        } else {
+            DispatchQueue.main.async {
+                self.customMirrors = updated
+                NotificationCenter.default.post(
+                    name: .makabaDomainDidChange,
+                    object: normalized
+                )
+            }
         }
         return (true, "Зеркало добавлено.")
     }
@@ -175,8 +191,12 @@ public final class DomainConfigurationService: ObservableObject, @unchecked Send
         let isCurrent = (_domain == mirror)
         lock.unlock()
 
-        DispatchQueue.main.async {
+        if Thread.isMainThread {
             self.customMirrors = updated
+        } else {
+            DispatchQueue.main.async {
+                self.customMirrors = updated
+            }
         }
 
         if isCurrent {

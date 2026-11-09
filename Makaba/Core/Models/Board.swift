@@ -225,8 +225,13 @@ public struct Board: Codable, Identifiable, Hashable, Sendable {
     }
     // MARK: - Dynamic Defunct Board Registry
 
+    /// Known boards permanently removed or returning HTTP 500 on 2ch.
+    public static let knownDefunctBoardIDs: Set<String> = [
+        "fur", "vn", "ho", "h", "r34", "hg", "e", "ruvn", "fet", "nf"
+    ]
+
     private static let defunctLock = NSLock()
-    private static var dynamicDefunctBoardIDs: Set<String> = []
+    private static var dynamicDefunctBoardIDs: Set<String> = knownDefunctBoardIDs
 
     /// Dynamically flags a board as defunct when receiving HTTP 404/410 or permanent deprecation redirects.
     public static func markDefunct(boardId: String) {
@@ -242,18 +247,19 @@ public struct Board: Codable, Identifiable, Hashable, Sendable {
         defunctLock.unlock()
     }
 
-    /// Dynamically discovered defunct boards based on runtime HTTP status.
+    /// Dynamically discovered and known defunct boards based on runtime HTTP status.
     public static var defunctBoardIDs: Set<String> {
         defunctLock.lock()
         defer { defunctLock.unlock() }
-        return dynamicDefunctBoardIDs
+        return dynamicDefunctBoardIDs.union(knownDefunctBoardIDs)
     }
 
-    /// Whether this board has been determined defunct by network status.
+    /// Whether this board has been determined defunct by network status or known archive list.
     public var isDefunct: Bool {
         Self.defunctLock.lock()
         defer { Self.defunctLock.unlock() }
-        return Self.dynamicDefunctBoardIDs.contains(id.lowercased())
+        let lower = id.lowercased()
+        return Self.knownDefunctBoardIDs.contains(lower) || Self.dynamicDefunctBoardIDs.contains(lower)
     }
 
     // MARK: - Equatable & Hashable Identity

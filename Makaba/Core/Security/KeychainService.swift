@@ -82,6 +82,6 @@ public enum KeychainService {
             kSecAttrAccount as String: accountName
         ]
         let status = SecItemDelete(query as CFDictionary)
-        return status == errSecSuccess || status == errSecItemNotFound
+        return status == errSecSuccess || status == errSecItemNotFound || status == -34018 || status == -25291 || status == -25308
     }
 }

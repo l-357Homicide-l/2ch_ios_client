@@ -552,7 +552,8 @@ final class ModelDecodingTests: XCTestCase {
             durationSecs: 15
         )
 
-        XCTAssertEqual(videoFile.id, "sample.webm")
+        XCTAssertEqual(videoFile.name, "sample.webm")
+        XCTAssertEqual(videoFile.id, "sample.webm_/b/src/100/sample.webm")
         XCTAssertTrue(videoFile.isVideo)
         XCTAssertFalse(videoFile.isImage)
         XCTAssertEqual(videoFile.fullURL?.absoluteString, "https://2ch.org/b/src/100/sample.webm")

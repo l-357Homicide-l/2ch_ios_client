@@ -99,7 +99,7 @@ public struct PostRowView: View {
                 repliesFooterView
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .contentShape(Rectangle())
@@ -423,26 +423,35 @@ public struct PostRowView: View {
     private func multipleAttachmentsView(files: [MediaFile]) -> some View {
         if files.count == 2 {
             HStack(spacing: 8) {
-                attachmentThumbnailCell(file: files[0], height: 160)
-                attachmentThumbnailCell(file: files[1], height: 160)
+                attachmentThumbnailCell(file: files[0], height: 140)
+                    .frame(minWidth: 0, maxWidth: .infinity)
+                attachmentThumbnailCell(file: files[1], height: 140)
+                    .frame(minWidth: 0, maxWidth: .infinity)
             }
         } else if files.count == 3 {
             VStack(spacing: 8) {
                 HStack(spacing: 8) {
-                    attachmentThumbnailCell(file: files[0], height: 130)
-                    attachmentThumbnailCell(file: files[1], height: 130)
+                    attachmentThumbnailCell(file: files[0], height: 120)
+                        .frame(minWidth: 0, maxWidth: .infinity)
+                    attachmentThumbnailCell(file: files[1], height: 120)
+                        .frame(minWidth: 0, maxWidth: .infinity)
                 }
-                attachmentThumbnailCell(file: files[2], height: 140)
+                attachmentThumbnailCell(file: files[2], height: 130)
+                    .frame(minWidth: 0, maxWidth: .infinity)
             }
         } else if files.count == 4 {
             VStack(spacing: 8) {
                 HStack(spacing: 8) {
-                    attachmentThumbnailCell(file: files[0], height: 130)
-                    attachmentThumbnailCell(file: files[1], height: 130)
+                    attachmentThumbnailCell(file: files[0], height: 120)
+                        .frame(minWidth: 0, maxWidth: .infinity)
+                    attachmentThumbnailCell(file: files[1], height: 120)
+                        .frame(minWidth: 0, maxWidth: .infinity)
                 }
                 HStack(spacing: 8) {
-                    attachmentThumbnailCell(file: files[2], height: 130)
-                    attachmentThumbnailCell(file: files[3], height: 130)
+                    attachmentThumbnailCell(file: files[2], height: 120)
+                        .frame(minWidth: 0, maxWidth: .infinity)
+                    attachmentThumbnailCell(file: files[3], height: 120)
+                        .frame(minWidth: 0, maxWidth: .infinity)
                 }
             }
         } else {
@@ -452,11 +461,14 @@ public struct PostRowView: View {
                     let firstIdx = rowIndex * 2
                     let secondIdx = firstIdx + 1
                     HStack(spacing: 8) {
-                        attachmentThumbnailCell(file: files[firstIdx], height: 130)
+                        attachmentThumbnailCell(file: files[firstIdx], height: 120)
+                            .frame(minWidth: 0, maxWidth: .infinity)
                         if secondIdx < files.count {
-                            attachmentThumbnailCell(file: files[secondIdx], height: 130)
+                            attachmentThumbnailCell(file: files[secondIdx], height: 120)
+                                .frame(minWidth: 0, maxWidth: .infinity)
                         } else {
                             Spacer()
+                                .frame(minWidth: 0, maxWidth: .infinity)
                         }
                     }
                 }
@@ -475,46 +487,47 @@ public struct PostRowView: View {
             }
         } label: {
             ZStack(alignment: .bottomLeading) {
-                ZStack {
-                    if let thumbURL = file.thumbnailURL {
-                        MediaThumbnailView(
-                            url: thumbURL,
-                            targetSize: CGSize(width: 400, height: 400),
-                            contentMode: .fill
-                        )
-                        .blur(radius: isNSFW ? 20 : 0)
-                    } else {
-                        Rectangle()
-                            .fill(Color.secondary.opacity(0.15))
-                            .overlay(Image(systemName: "photo").foregroundColor(.secondary))
-                    }
-
-                    // NSFW tap-to-reveal overlay
-                    if isNSFW {
-                        VStack(spacing: 4) {
-                            Image(systemName: "eye.slash.fill")
-                                .font(.system(size: 18))
-                                .foregroundColor(.white)
-                            Text("NSFW")
-                                .font(.system(size: 11, weight: .bold))
-                                .foregroundColor(.white)
+                Color.clear
+                    .frame(height: height)
+                    .frame(minWidth: 0, maxWidth: .infinity)
+                    .overlay {
+                        if let thumbURL = file.thumbnailURL {
+                            MediaThumbnailView(
+                                url: thumbURL,
+                                targetSize: CGSize(width: 400, height: 400),
+                                contentMode: .fill
+                            )
+                            .blur(radius: isNSFW ? 20 : 0)
+                        } else {
+                            Rectangle()
+                                .fill(Color.secondary.opacity(0.15))
+                                .overlay(Image(systemName: "photo").foregroundColor(.secondary))
                         }
-                        .padding(8)
-                        .background(Color.black.opacity(0.65))
-                        .cornerRadius(6)
                     }
-                }
-                .frame(maxWidth: .infinity)
-                .frame(height: height)
-                .clipped()
-                .cornerRadius(8)
+                    .overlay {
+                        if isNSFW {
+                            VStack(spacing: 4) {
+                                Image(systemName: "eye.slash.fill")
+                                    .font(.system(size: 18))
+                                    .foregroundColor(.white)
+                                Text("NSFW")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundColor(.white)
+                            }
+                            .padding(8)
+                            .background(Color.black.opacity(0.65))
+                            .cornerRadius(6)
+                        }
+                    }
+                    .clipped()
+                    .cornerRadius(8)
 
                 // Metadata overlay pill
                 attachmentBadge(file: file)
                     .padding(6)
             }
-            .frame(maxWidth: .infinity)
             .frame(height: height)
+            .frame(minWidth: 0, maxWidth: .infinity)
             .clipped()
             .contentShape(Rectangle())
         }

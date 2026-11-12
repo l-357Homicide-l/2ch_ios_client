@@ -517,7 +517,7 @@ public struct CatalogGridCard: View {
         }
         .padding(10)
         .frame(height: 245)
-        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .frame(minWidth: 0, maxWidth: .infinity, alignment: .topLeading)
         .clipped()
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -550,7 +550,7 @@ public struct CatalogGridCard: View {
             }
         }
         .frame(height: 110)
-        .frame(maxWidth: .infinity)
+        .frame(minWidth: 0, maxWidth: .infinity)
         .clipped()
         .cornerRadius(8)
         .overlay(alignment: .bottomLeading) {

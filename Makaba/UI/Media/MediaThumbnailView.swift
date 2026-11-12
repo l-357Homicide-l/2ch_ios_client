@@ -33,33 +33,34 @@ public struct MediaThumbnailView: View {
     }
 
     public var body: some View {
-        ZStack {
-            if let image = image {
-                Image(uiImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: contentMode)
-                    .clipped()
-            } else if hasFailed {
-                Rectangle()
-                    .fill(Color.secondary.opacity(0.15))
-                    .overlay(
-                        Image(systemName: "photo")
-                            .font(.system(size: 20))
-                            .foregroundColor(.secondary)
-                    )
-            } else {
-                Rectangle()
-                    .fill(Color.secondary.opacity(0.12))
-                    .overlay(
-                        ProgressView()
-                            .scaleEffect(0.7)
-                    )
+        Color.clear
+            .overlay {
+                if let image = image {
+                    Image(uiImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: contentMode)
+                } else if hasFailed {
+                    Rectangle()
+                        .fill(Color.secondary.opacity(0.15))
+                        .overlay(
+                            Image(systemName: "photo")
+                                .font(.system(size: 20))
+                                .foregroundColor(.secondary)
+                        )
+                } else {
+                    Rectangle()
+                        .fill(Color.secondary.opacity(0.12))
+                        .overlay(
+                            ProgressView()
+                                .scaleEffect(0.7)
+                        )
+                }
             }
-        }
-        .clipped()
-        .task(id: url) {
-            await loadImage()
-        }
+            .clipped()
+            .contentShape(Rectangle())
+            .task(id: url) {
+                await loadImage()
+            }
     }
 
     private func loadImage() async {

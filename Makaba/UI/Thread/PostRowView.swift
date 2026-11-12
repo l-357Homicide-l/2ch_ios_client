@@ -127,6 +127,7 @@ public struct PostRowView: View {
         .onValueChange(of: post.dislikes) { newDislikes in
             if let dislikes = newDislikes { self.localDislikes = dislikes }
         }
+        .modifier(PostRowGeometryIsolationModifier())
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Пост номер \(post.num), автор \(cleanAuthorName), дата \(post.date)")
         .accessibilityHint("Дважды коснитесь для вызова контекстного меню или ответа")
@@ -404,86 +405,120 @@ public struct PostRowView: View {
         }
     }
 
-    private func singleAttachmentView(file: MediaFile) -> some View {
-        Button {
-            onMediaTapped(file)
-        } label: {
-            ZStack(alignment: .bottomLeading) {
-                attachmentImage(file: file)
-                    .frame(maxWidth: .infinity)
-                    .frame(maxHeight: 260)
-                    .clipped()
-                    .cornerRadius(8)
-
-                // Metadata overlay pill
-                attachmentBadge(file: file)
-                    .padding(6)
-            }
-        }
-        .buttonStyle(.plain)
+    private func singleAttachmentHeight(for file: MediaFile) -> CGFloat {
+        let w = CGFloat(file.width)
+        let h = CGFloat(file.height)
+        guard w > 0 && h > 0 else { return 220 }
+        let ratio = h / w
+        let estimatedWidth: CGFloat = 330
+        return min(280, max(140, estimatedWidth * ratio))
     }
 
-    private func multipleAttachmentsView(files: [MediaFile]) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(files) { file in
-                    Button {
-                        onMediaTapped(file)
-                    } label: {
-                        ZStack(alignment: .bottomLeading) {
-                            attachmentImage(file: file)
-                                .frame(width: 140, height: 140)
-                                .clipped()
-                                .cornerRadius(8)
-
-                            attachmentBadge(file: file)
-                                .padding(4)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.vertical, 2)
-        }
+    private func singleAttachmentView(file: MediaFile) -> some View {
+        let height = singleAttachmentHeight(for: file)
+        return attachmentThumbnailCell(file: file, height: height)
     }
 
     @ViewBuilder
-    private func attachmentImage(file: MediaFile) -> some View {
-        let isNSFW = (file.nsfw ?? 0) != 0 && !revealedNSFWFiles.contains(file.name)
-
-        ZStack {
-            if let thumbURL = file.thumbnailURL {
-                MediaThumbnailView(url: thumbURL, targetSize: CGSize(width: 300, height: 300))
-                    .blur(radius: isNSFW ? 20 : 0)
-            } else {
-                Rectangle()
-                    .fill(Color.secondary.opacity(0.15))
-                    .overlay(Image(systemName: "photo").foregroundColor(.secondary))
+    private func multipleAttachmentsView(files: [MediaFile]) -> some View {
+        if files.count == 2 {
+            HStack(spacing: 8) {
+                attachmentThumbnailCell(file: files[0], height: 160)
+                attachmentThumbnailCell(file: files[1], height: 160)
             }
-
-            // NSFW tap-to-reveal overlay
-            if isNSFW {
-                VStack(spacing: 4) {
-                    Image(systemName: "eye.slash.fill")
-                        .font(.system(size: 18))
-                        .foregroundColor(.white)
-                    Text("NSFW")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundColor(.white)
+        } else if files.count == 3 {
+            VStack(spacing: 8) {
+                HStack(spacing: 8) {
+                    attachmentThumbnailCell(file: files[0], height: 130)
+                    attachmentThumbnailCell(file: files[1], height: 130)
                 }
-                .padding(8)
-                .background(Color.black.opacity(0.6))
-                .cornerRadius(6)
+                attachmentThumbnailCell(file: files[2], height: 140)
+            }
+        } else if files.count == 4 {
+            VStack(spacing: 8) {
+                HStack(spacing: 8) {
+                    attachmentThumbnailCell(file: files[0], height: 130)
+                    attachmentThumbnailCell(file: files[1], height: 130)
+                }
+                HStack(spacing: 8) {
+                    attachmentThumbnailCell(file: files[2], height: 130)
+                    attachmentThumbnailCell(file: files[3], height: 130)
+                }
+            }
+        } else {
+            let rowCount = (files.count + 1) / 2
+            VStack(spacing: 8) {
+                ForEach(0..<rowCount, id: \.self) { rowIndex in
+                    let firstIdx = rowIndex * 2
+                    let secondIdx = firstIdx + 1
+                    HStack(spacing: 8) {
+                        attachmentThumbnailCell(file: files[firstIdx], height: 130)
+                        if secondIdx < files.count {
+                            attachmentThumbnailCell(file: files[secondIdx], height: 130)
+                        } else {
+                            Spacer()
+                        }
+                    }
+                }
             }
         }
-        .contentShape(Rectangle())
-        .onTapGesture {
+    }
+
+    private func attachmentThumbnailCell(file: MediaFile, height: CGFloat) -> some View {
+        let isNSFW = (file.nsfw ?? 0) != 0 && !revealedNSFWFiles.contains(file.name)
+
+        return Button {
             if isNSFW {
                 revealedNSFWFiles.insert(file.name)
             } else {
                 onMediaTapped(file)
             }
+        } label: {
+            ZStack(alignment: .bottomLeading) {
+                ZStack {
+                    if let thumbURL = file.thumbnailURL {
+                        MediaThumbnailView(
+                            url: thumbURL,
+                            targetSize: CGSize(width: 400, height: 400),
+                            contentMode: .fill
+                        )
+                        .blur(radius: isNSFW ? 20 : 0)
+                    } else {
+                        Rectangle()
+                            .fill(Color.secondary.opacity(0.15))
+                            .overlay(Image(systemName: "photo").foregroundColor(.secondary))
+                    }
+
+                    // NSFW tap-to-reveal overlay
+                    if isNSFW {
+                        VStack(spacing: 4) {
+                            Image(systemName: "eye.slash.fill")
+                                .font(.system(size: 18))
+                                .foregroundColor(.white)
+                            Text("NSFW")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundColor(.white)
+                        }
+                        .padding(8)
+                        .background(Color.black.opacity(0.65))
+                        .cornerRadius(6)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: height)
+                .clipped()
+                .cornerRadius(8)
+
+                // Metadata overlay pill
+                attachmentBadge(file: file)
+                    .padding(6)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: height)
+            .clipped()
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
     }
 
     private func attachmentBadge(file: MediaFile) -> some View {
@@ -598,6 +633,18 @@ public struct FlowLayout: Layout {
             subview.place(at: CGPoint(x: currentX, y: currentY), proposal: ProposedViewSize(size))
             currentX += size.width + spacing
             lineHeight = max(lineHeight, size.height)
+        }
+    }
+}
+
+// MARK: - Geometry Isolation Modifier
+
+private struct PostRowGeometryIsolationModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 17.0, *) {
+            content.geometryGroup()
+        } else {
+            content
         }
     }
 }

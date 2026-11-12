@@ -212,6 +212,7 @@ public struct QuotePreviewSheet: View {
                 }
             }
         }
+        .frame(height: 100)
     }
 
     private var referencedQuotesView: some View {

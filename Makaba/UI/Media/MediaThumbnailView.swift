@@ -38,6 +38,7 @@ public struct MediaThumbnailView: View {
                 Image(uiImage: image)
                     .resizable()
                     .aspectRatio(contentMode: contentMode)
+                    .clipped()
             } else if hasFailed {
                 Rectangle()
                     .fill(Color.secondary.opacity(0.15))
@@ -55,6 +56,7 @@ public struct MediaThumbnailView: View {
                     )
             }
         }
+        .clipped()
         .task(id: url) {
             await loadImage()
         }

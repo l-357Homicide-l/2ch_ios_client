@@ -21,32 +21,38 @@ public enum KeychainService {
         lock.lock()
         defer { lock.unlock() }
 
-        // 1. Delete query strictly restricted to identity attributes (prevents errSecParam -50)
-        let deleteQuery: [String: Any] = [
+        let baseQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: serviceName,
             kSecAttrAccount as String: accountName
         ]
-        SecItemDelete(deleteQuery as CFDictionary)
 
-        // 2. Add query with full payload and accessibility parameters
-        let addQuery: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: serviceName,
-            kSecAttrAccount as String: accountName,
-            kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
-        ]
-        let status = SecItemAdd(addQuery as CFDictionary, nil)
+        var addQuery = baseQuery
+        addQuery[kSecValueData as String] = data
+        addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+
+        var status = SecItemAdd(addQuery as CFDictionary, nil)
+        if status == errSecDuplicateItem {
+            let updateAttrs: [String: Any] = [
+                kSecValueData as String: data,
+                kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
+            ]
+            status = SecItemUpdate(baseQuery as CFDictionary, updateAttrs as CFDictionary)
+        }
+
         if status == errSecSuccess {
-            memoryFallback = nil
+            memoryFallback = nil // Clear transient memory fallback on verified Keychain persistence
             return true
-        } else {
-            // In headless CI environments or simulators lacking signed keychain access group entitlements (-34018),
-            // maintain thread-safe memory fallback so tests and transient sessions execute cleanly.
+        }
+
+        // In headless CI / test simulator environments lacking signed keychain entitlements (-34018),
+        // maintain in-memory fallback so automated test suites execute cleanly.
+        if status == -34018 || status == errSecNotAvailable {
             memoryFallback = token
             return true
         }
+
+        return false
     }
 
     /// Loads the stored VIP passcode from Keychain, or returns nil if absent.

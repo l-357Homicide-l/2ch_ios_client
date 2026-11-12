@@ -39,6 +39,7 @@ public struct DraftEntry: Identifiable, Sendable {
 public final class DatabaseService: @unchecked Sendable {
     public static let shared = DatabaseService()
 
+    private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
     private let lock = NSRecursiveLock()
     private var db: OpaquePointer?
     private let dbPath: String
@@ -56,6 +57,10 @@ public final class DatabaseService: @unchecked Sendable {
         self.dbPath = databaseURL.path
 
         if sqlite3_open(dbPath, &db) == SQLITE_OK {
+            // Configure concurrency and busy timeout to prevent SQLITE_BUSY lockouts
+            sqlite3_busy_timeout(db, 5000)
+            executeSimple("PRAGMA journal_mode = WAL;")
+            executeSimple("PRAGMA synchronous = NORMAL;")
             createTables()
         }
     }
@@ -64,7 +69,7 @@ public final class DatabaseService: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         if let db = db {
-            sqlite3_close(db)
+            sqlite3_close_v2(db)
         }
     }
 
@@ -78,6 +83,7 @@ public final class DatabaseService: @unchecked Sendable {
             updated_at REAL NOT NULL,
             PRIMARY KEY (board, thread_num)
         );
+        CREATE INDEX IF NOT EXISTS idx_history_updated_at ON thread_history(updated_at DESC);
         """
 
         let favoritesSQL = """
@@ -88,6 +94,7 @@ public final class DatabaseService: @unchecked Sendable {
             added_at REAL NOT NULL,
             PRIMARY KEY (board, thread_num)
         );
+        CREATE INDEX IF NOT EXISTS idx_favorites_added_at ON favorites(added_at DESC);
         """
 
         let draftsSQL = """
@@ -134,9 +141,9 @@ public final class DatabaseService: @unchecked Sendable {
 
         var statement: OpaquePointer?
         if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
-            sqlite3_bind_text(statement, 1, (board as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(statement, 1, board, Int32(board.utf8.count), SQLITE_TRANSIENT)
             sqlite3_bind_int64(statement, 2, Int64(threadNum))
-            sqlite3_bind_text(statement, 3, (title as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(statement, 3, title, Int32(title.utf8.count), SQLITE_TRANSIENT)
             sqlite3_bind_int64(statement, 4, Int64(lastReadNum))
             sqlite3_bind_double(statement, 5, Date().timeIntervalSince1970)
 
@@ -208,7 +215,7 @@ public final class DatabaseService: @unchecked Sendable {
         var exists = false
 
         if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
-            sqlite3_bind_text(statement, 1, (board as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(statement, 1, board, Int32(board.utf8.count), SQLITE_TRANSIENT)
             sqlite3_bind_int64(statement, 2, Int64(threadNum))
             if sqlite3_step(statement) == SQLITE_ROW {
                 exists = true
@@ -228,9 +235,9 @@ public final class DatabaseService: @unchecked Sendable {
         """
         var statement: OpaquePointer?
         if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
-            sqlite3_bind_text(statement, 1, (board as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(statement, 1, board, Int32(board.utf8.count), SQLITE_TRANSIENT)
             sqlite3_bind_int64(statement, 2, Int64(threadNum))
-            sqlite3_bind_text(statement, 3, (title as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(statement, 3, title, Int32(title.utf8.count), SQLITE_TRANSIENT)
             sqlite3_bind_double(statement, 4, Date().timeIntervalSince1970)
             sqlite3_step(statement)
         }
@@ -244,7 +251,7 @@ public final class DatabaseService: @unchecked Sendable {
         let sql = "DELETE FROM favorites WHERE board = ? AND thread_num = ?;"
         var statement: OpaquePointer?
         if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
-            sqlite3_bind_text(statement, 1, (board as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(statement, 1, board, Int32(board.utf8.count), SQLITE_TRANSIENT)
             sqlite3_bind_int64(statement, 2, Int64(threadNum))
             sqlite3_step(statement)
         }
@@ -287,11 +294,11 @@ public final class DatabaseService: @unchecked Sendable {
         """
         var statement: OpaquePointer?
         if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
-            sqlite3_bind_text(statement, 1, (board as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(statement, 1, board, Int32(board.utf8.count), SQLITE_TRANSIENT)
             sqlite3_bind_int64(statement, 2, Int64(threadNum))
-            sqlite3_bind_text(statement, 3, (comment as NSString).utf8String, -1, nil)
-            sqlite3_bind_text(statement, 4, (name as NSString).utf8String, -1, nil)
-            sqlite3_bind_text(statement, 5, (email as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(statement, 3, comment, Int32(comment.utf8.count), SQLITE_TRANSIENT)
+            sqlite3_bind_text(statement, 4, name, Int32(name.utf8.count), SQLITE_TRANSIENT)
+            sqlite3_bind_text(statement, 5, email, Int32(email.utf8.count), SQLITE_TRANSIENT)
             sqlite3_bind_double(statement, 6, Date().timeIntervalSince1970)
             sqlite3_step(statement)
         }
@@ -307,7 +314,7 @@ public final class DatabaseService: @unchecked Sendable {
         var result: DraftEntry? = nil
 
         if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
-            sqlite3_bind_text(statement, 1, (board as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(statement, 1, board, Int32(board.utf8.count), SQLITE_TRANSIENT)
             sqlite3_bind_int64(statement, 2, Int64(threadNum))
 
             if sqlite3_step(statement) == SQLITE_ROW {
@@ -333,7 +340,7 @@ public final class DatabaseService: @unchecked Sendable {
         let sql = "DELETE FROM drafts WHERE board = ? AND thread_num = ?;"
         var statement: OpaquePointer?
         if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
-            sqlite3_bind_text(statement, 1, (board as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(statement, 1, board, Int32(board.utf8.count), SQLITE_TRANSIENT)
             sqlite3_bind_int64(statement, 2, Int64(threadNum))
             sqlite3_step(statement)
         }

@@ -457,11 +457,6 @@ public struct PostingSheet: View {
             .onValueChange(of: selectedPhotosItems) { newItems in
                 handlePhotosSelection(newItems)
             }
-            .task {
-                if viewModel.captchaViewModel.state == .idle {
-                    viewModel.captchaViewModel.startVerification()
-                }
-            }
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
@@ -969,12 +964,10 @@ public struct PostingSheet: View {
     }
 
     private func handlePhotosSelection(_ items: [PhotosPickerItem]) {
-        Task.detached(priority: .userInitiated) {
+        let vm = viewModel
+        Task {
             for item in items {
-                let hasCapacity = await MainActor.run {
-                    viewModel.attachments.count < PostingViewModel.maxAttachmentsCount
-                }
-                guard hasCapacity else { break }
+                guard vm.attachments.count < PostingViewModel.maxAttachmentsCount else { break }
 
                 guard let data = try? await item.loadTransferable(type: Data.self) else {
                     continue
@@ -991,7 +984,7 @@ public struct PostingSheet: View {
                     rawExtension: rawExt
                 )
 
-                let count = await MainActor.run { viewModel.attachments.count }
+                let count = vm.attachments.count
                 let fileName = "photo_\(Int(Date().timeIntervalSince1970))_\(count + 1).\(ext)"
 
                 let attachment = PostingAttachmentItem(
@@ -1001,26 +994,20 @@ public struct PostingSheet: View {
                     isVideo: isVideo
                 )
 
-                await MainActor.run {
-                    _ = viewModel.addAttachment(attachment)
-                }
+                _ = vm.addAttachment(attachment)
             }
             // Clear picker items to avoid re-importing on subsequent opens
-            await MainActor.run {
-                self.selectedPhotosItems.removeAll()
-            }
+            self.selectedPhotosItems.removeAll()
         }
     }
 
     private func handleFileImporterResult(_ result: Result<[URL], Error>) {
         switch result {
         case .success(let urls):
-            Task.detached(priority: .userInitiated) {
+            let vm = viewModel
+            Task {
                 for url in urls {
-                    let hasCapacity = await MainActor.run {
-                        viewModel.attachments.count < PostingViewModel.maxAttachmentsCount
-                    }
-                    guard hasCapacity else { break }
+                    guard vm.attachments.count < PostingViewModel.maxAttachmentsCount else { break }
 
                     guard url.startAccessingSecurityScopedResource() else { continue }
 
@@ -1053,9 +1040,7 @@ public struct PostingSheet: View {
                         isVideo: isVideo
                     )
 
-                    await MainActor.run {
-                        _ = viewModel.addAttachment(attachment)
-                    }
+                    _ = vm.addAttachment(attachment)
                 }
             }
         case .failure(let error):

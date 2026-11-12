@@ -8,7 +8,10 @@
 import SwiftUI
 import UIKit
 
+@MainActor
 public struct PostRowView: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
     public let post: Post
     public let isOPPost: Bool
     public let boardId: String?
@@ -96,13 +99,34 @@ public struct PostRowView: View {
                 repliesFooterView
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
+        .contentShape(Rectangle())
         .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(cardBackgroundColor)
-                .shadow(color: Color.black.opacity(0.03), radius: 2, x: 0, y: 1)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(cardTintOverlay)
+                )
+                .shadow(
+                    color: Color.black.opacity(colorScheme == .dark ? 0.28 : 0.06),
+                    radius: 3,
+                    x: 0,
+                    y: 1.5
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(cardBorderColor, lineWidth: cardBorderWidth)
+                )
         )
+        .onValueChange(of: post.likes) { newLikes in
+            if let likes = newLikes { self.localLikes = likes }
+        }
+        .onValueChange(of: post.dislikes) { newDislikes in
+            if let dislikes = newDislikes { self.localDislikes = dislikes }
+        }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Пост номер \(post.num), автор \(cleanAuthorName), дата \(post.date)")
         .accessibilityHint("Дважды коснитесь для вызова контекстного меню или ответа")
@@ -327,10 +351,33 @@ public struct PostRowView: View {
     }
 
     private var cardBackgroundColor: Color {
-        if post.isOP || isOPPost {
-            return Color.orange.opacity(0.04)
-        }
+        // Always return an opaque base fill to prevent drop shadow bleed-through
         return Color(UIColor.secondarySystemGroupedBackground)
+    }
+
+    private var cardTintOverlay: Color {
+        if post.isOP || isOPPost {
+            return colorScheme == .dark
+                ? Color.orange.opacity(0.12)
+                : Color.orange.opacity(0.07)
+        }
+        return Color.clear
+    }
+
+    private var cardBorderWidth: CGFloat {
+        colorSchemeContrast == .increased ? 1.0 : 0.5
+    }
+
+    private var cardBorderColor: Color {
+        if post.isOP || isOPPost {
+            return Color.orange.opacity(colorScheme == .dark ? 0.55 : 0.40)
+        }
+        if colorSchemeContrast == .increased {
+            return Color(UIColor.separator)
+        }
+        return colorScheme == .dark
+            ? Color.white.opacity(0.10)
+            : Color(UIColor.separator).opacity(0.6)
     }
 
     private var shouldShowSubject: Bool {

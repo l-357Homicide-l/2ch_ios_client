@@ -39,6 +39,7 @@ public final class ThreadViewModel: ObservableObject {
     @Published public var isArchived: Bool = false
 
     private let apiClient: MakabaAPIClient
+    private var activeLoadTask: Task<Void, Never>?
 
     public init(boardId: String, threadNum: Int, apiClient: MakabaAPIClient = .shared) {
         self.boardId = boardId
@@ -48,88 +49,100 @@ public final class ThreadViewModel: ObservableObject {
 
     /// Fetches all posts in the thread and calculates the reply graph with smooth incremental diffing.
     public func loadThread(forceRefresh: Bool = false) async {
-        if posts.isEmpty {
-            isLoading = true
-        } else {
-            isRefreshing = true
+        if (isLoading || isRefreshing) && !forceRefresh {
+            return
         }
-        errorMessage = nil
-
-        do {
-            let response = try await apiClient.fetchThread(board: boardId, threadNum: threadNum, ignoreCache: forceRefresh)
-            self.threadResponse = response
-
-            // Offload HTML Parsing to background cooperative task
-            let newPostsToParse = response.posts
-            let parsedMap = await Task.detached(priority: .userInitiated) {
-                newPostsToParse.reduce(into: [Int: AttributedString]()) { map, post in
-                    map[post.num] = MakabaHTMLParser.parse(html: post.comment)
-                }
-            }.value
-            self.parsedComments.merge(parsedMap) { _, new in new }
-
-            // Moderation-Aware Incremental Diffing
-            let responsePostMap = Dictionary(response.posts.map { ($0.num, $0) }, uniquingKeysWith: { first, _ in first })
-            let existingIDs = Set(self.posts.map(\.num))
-            let responseIDs = Set(response.posts.map(\.num))
-
-            let deletedIDs = existingIDs.subtracting(responseIDs)
-            let newPosts = response.posts.filter { !existingIDs.contains($0.num) }
-
-            if self.posts.isEmpty || forceRefresh {
-                self.posts = response.posts
-                self.buildReplyGraph()
-                self.buildMediaList()
+        activeLoadTask?.cancel()
+        let currentTask = Task { @MainActor [weak self] in
+            guard let self = self else { return }
+            if self.posts.isEmpty {
+                self.isLoading = true
             } else {
-                var updatedPosts = self.posts
-                // 1. Surgical removal of moderated/deleted posts
-                if !deletedIDs.isEmpty {
-                    updatedPosts.removeAll { deletedIDs.contains($0.num) }
-                }
-                // 2. In-place metadata updates (scores, likes)
-                for i in 0..<updatedPosts.count {
-                    if let updated = responsePostMap[updatedPosts[i].num] {
-                        updatedPosts[i] = updated
-                    }
-                }
-                // 3. Append strictly new posts
-                if !newPosts.isEmpty {
-                    updatedPosts.append(contentsOf: newPosts)
-                }
-                // 4. Atomic publisher emission
-                self.posts = updatedPosts
+                self.isRefreshing = true
+            }
+            self.errorMessage = nil
 
-                // 5. Rebuild reply backlinks graph and media list if set of posts changed
-                if !deletedIDs.isEmpty || !newPosts.isEmpty {
+            do {
+                let response = try await self.apiClient.fetchThread(board: self.boardId, threadNum: self.threadNum, ignoreCache: forceRefresh)
+                self.threadResponse = response
+
+                // Offload HTML Parsing: re-parse all if forceRefresh, otherwise parse new arrivals only
+                let existingParsedKeys = Set(self.parsedComments.keys)
+                let newPostsToParse = forceRefresh
+                    ? response.posts
+                    : response.posts.filter { !existingParsedKeys.contains($0.num) }
+                let parsedMap = await Task.detached(priority: .userInitiated) {
+                    newPostsToParse.reduce(into: [Int: AttributedString]()) { map, post in
+                        map[post.num] = MakabaHTMLParser.parse(html: post.comment)
+                    }
+                }.value
+                self.parsedComments.merge(parsedMap) { _, new in new }
+
+                // Moderation-Aware Incremental Diffing
+                let responsePostMap = Dictionary(response.posts.map { ($0.num, $0) }, uniquingKeysWith: { first, _ in first })
+                let existingIDs = Set(self.posts.map(\.num))
+                let responseIDs = Set(response.posts.map(\.num))
+
+                let deletedIDs = existingIDs.subtracting(responseIDs)
+                let newPosts = response.posts.filter { !existingIDs.contains($0.num) }
+
+                if self.posts.isEmpty || forceRefresh {
+                    self.posts = response.posts
                     self.buildReplyGraph()
                     self.buildMediaList()
-                }
-            }
+                } else {
+                    var updatedPosts = self.posts
+                    // 1. Surgical removal of moderated/deleted posts
+                    if !deletedIDs.isEmpty {
+                        updatedPosts.removeAll { deletedIDs.contains($0.num) }
+                    }
+                    // 2. In-place metadata updates (scores, likes)
+                    for i in 0..<updatedPosts.count {
+                        if let updated = responsePostMap[updatedPosts[i].num] {
+                            updatedPosts[i] = updated
+                        }
+                    }
+                    // 3. Append strictly new posts
+                    if !newPosts.isEmpty {
+                        updatedPosts.append(contentsOf: newPosts)
+                    }
+                    // 4. Atomic publisher emission
+                    self.posts = updatedPosts
 
-            self.isLoading = false
-            self.isRefreshing = false
-        } catch let apiError as MakabaAPIError {
-            // Auto-fallback to archived thread on 404 ([ISSUE-24])
-            var is404 = false
-            if case .httpError(let code, _) = apiError, code == 404 { is404 = true }
-            if is404, let archived = try? await apiClient.fetchArchivedThread(board: boardId, threadNum: threadNum) {
-                self.threadResponse = archived
-                self.posts = archived.posts
-                self.isArchived = true
-                self.buildReplyGraph()
-                self.buildMediaList()
+                    // 5. Rebuild reply backlinks graph and media list if set of posts changed
+                    if !deletedIDs.isEmpty || !newPosts.isEmpty {
+                        self.buildReplyGraph()
+                        self.buildMediaList()
+                    }
+                }
+
                 self.isLoading = false
                 self.isRefreshing = false
-                return
+            } catch let apiError as MakabaAPIError {
+                // Auto-fallback to archived thread on 404 ([ISSUE-24])
+                var is404 = false
+                if case .httpError(let code, _) = apiError, code == 404 { is404 = true }
+                if is404, let archived = try? await self.apiClient.fetchArchivedThread(board: self.boardId, threadNum: self.threadNum) {
+                    self.threadResponse = archived
+                    self.posts = archived.posts
+                    self.isArchived = true
+                    self.buildReplyGraph()
+                    self.buildMediaList()
+                    self.isLoading = false
+                    self.isRefreshing = false
+                    return
+                }
+                self.errorMessage = apiError.localizedDescription
+                self.isLoading = false
+                self.isRefreshing = false
+            } catch {
+                self.errorMessage = error.localizedDescription
+                self.isLoading = false
+                self.isRefreshing = false
             }
-            self.errorMessage = apiError.localizedDescription
-            self.isLoading = false
-            self.isRefreshing = false
-        } catch {
-            self.errorMessage = error.localizedDescription
-            self.isLoading = false
-            self.isRefreshing = false
         }
+        self.activeLoadTask = currentTask
+        await currentTask.value
     }
 
     /// Computes the bidirectional reply graph across all posts.
@@ -284,17 +297,21 @@ public struct ThreadView: View {
                         .frame(maxWidth: .infinity, alignment: .center)
                         .padding(.bottom, 70)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
-                        .onAppear {
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
-                                withAnimation {
-                                    self.toastMessage = nil
-                                }
+                        .id(toast)
+                        .task(id: toast) {
+                            try? await Task.sleep(nanoseconds: 2_500_000_000)
+                            guard !Task.isCancelled else { return }
+                            withAnimation {
+                                self.toastMessage = nil
                             }
                         }
                 }
             }
             .navigationTitle("/\(viewModel.boardId)/ #\(viewModel.threadNum)")
             .navigationBarTitleDisplayMode(.inline)
+            .background(Color(UIColor.systemGroupedBackground).ignoresSafeArea())
+            .toolbarBackground(Color(UIColor.systemGroupedBackground), for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
                     // Manual Refresh Button
@@ -393,7 +410,7 @@ public struct ThreadView: View {
 
     private func threadContent(proxy: ScrollViewProxy) -> some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 10) {
+            LazyVStack(alignment: .leading, spacing: 12) {
                 // OP Header Banner
                 opThreadHeaderView
 
@@ -437,7 +454,7 @@ public struct ThreadView: View {
                     .frame(height: 60)
                     .id("bottom_anchor")
             }
-            .padding(.horizontal, 10)
+            .padding(.horizontal, 12)
             .padding(.vertical, 8)
         }
     }

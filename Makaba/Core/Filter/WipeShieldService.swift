@@ -20,7 +20,6 @@ public final class WipeShieldService: @unchecked Sendable {
     private let lock = NSLock()
     private var blacklistedKeywords: Set<String> = []
     private var blacklistedTripcodes: Set<String> = []
-    private var regexFilters: [NSRegularExpression] = []
 
     private let keywordsKey = "MakabaFilterKeywords"
     private let tripsKey = "MakabaFilterTripcodes"
@@ -90,6 +89,22 @@ public final class WipeShieldService: @unchecked Sendable {
         return Array(blacklistedTripcodes).sorted()
     }
 
+    /// Linear O(N) non-backtracking scanner detecting identical consecutive character floods.
+    private func hasExcessiveCharacterRepetition(_ text: String, threshold: Int = 12) -> Bool {
+        var count = 0
+        var lastChar: Character?
+        for char in text {
+            if char == lastChar {
+                count += 1
+                if count >= threshold { return true }
+            } else {
+                lastChar = char
+                count = 1
+            }
+        }
+        return false
+    }
+
     /// Evaluates a post against all configured spam and content filter rules.
     public func evaluate(post: Post) -> FilterAction {
         lock.lock()
@@ -102,18 +117,18 @@ public final class WipeShieldService: @unchecked Sendable {
             return .hidden(reason: "Заблокированный трипкод \(postTrip)")
         }
 
-        // 2. Keyword check against comment text and subject
-        let lowerComment = post.comment.lowercased()
+        // 2. Keyword check against plain comment text and subject (ignoring HTML tags)
+        let plainText = MakabaHTMLParser.toPlainText(html: post.comment).lowercased()
         let lowerSubject = (post.subject ?? "").lowercased()
 
         for kw in keywords {
-            if lowerComment.contains(kw) || lowerSubject.contains(kw) {
+            if plainText.contains(kw) || lowerSubject.contains(kw) {
                 return .collapsed(reason: "Фильтр ключевых слов: '\(kw)'")
             }
         }
 
-        // 3. Flood repetition heuristic (>10 consecutive identical characters)
-        if lowerComment.range(of: #"(.)\1{12,}"#, options: .regularExpression) != nil {
+        // 3. Flood repetition heuristic (>12 consecutive identical characters)
+        if hasExcessiveCharacterRepetition(plainText, threshold: 12) {
             return .collapsed(reason: "Вайп-флуд: повторяющиеся символы")
         }
 

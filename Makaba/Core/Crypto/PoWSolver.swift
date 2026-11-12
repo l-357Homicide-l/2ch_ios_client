@@ -133,21 +133,23 @@ public final class PoWSolver: Sendable {
         }
 
         let startTime = CFAbsoluteTimeGetCurrent()
-        let coreCount = max(1, ProcessInfo.processInfo.activeProcessorCount)
+        // Cap background workers to at most 2 threads to leave cooperative threads open for UI/networking
+        let workerCount = min(2, max(1, ProcessInfo.processInfo.activeProcessorCount / 2))
 
         return try await withThrowingTaskGroup(of: (Int, String)?.self) { group in
-            for workerIndex in 0..<coreCount {
+            for workerIndex in 0..<workerCount {
                 group.addTask {
                     var nonce = workerIndex
                     var iterations = 0
                     while nonce < limit {
                         iterations += 1
-                        if (iterations & 1023) == 0 && Task.isCancelled {
-                            return nil
+                        if (iterations & 1023) == 0 {
+                            if Task.isCancelled { return nil }
+                            await Task.yield() // Yield cooperative thread periodically
                         }
                         let candidate = "\(prefix)\(nonce)\(suffix)"
                         guard let data = candidate.data(using: .utf8) else {
-                            nonce += coreCount
+                            nonce += workerCount
                             continue
                         }
                         let digest = SHA512.hash(data: data)
@@ -155,7 +157,7 @@ public final class PoWSolver: Sendable {
                             let hexString = digest.map { String(format: "%02x", $0) }.joined()
                             return (nonce, hexString)
                         }
-                        nonce += coreCount
+                        nonce += workerCount
                     }
                     return nil
                 }
@@ -170,7 +172,7 @@ public final class PoWSolver: Sendable {
             }
 
             if Task.isCancelled {
-                throw PoWError.cancelled
+                throw CancellationError()
             }
             throw PoWError.limitExceeded(limit)
         }

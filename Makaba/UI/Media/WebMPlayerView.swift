@@ -455,6 +455,12 @@ public struct WebKitPlayerBridgeView: UIViewRepresentable {
             model?.handleEngineError("Ошибка загрузки веб-плеера: \(error.localizedDescription)")
         }
 
+        public func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            isPageLoaded = false
+            model?.handleEngineError("Процесс WebKit завершился из-за нехватки памяти (WebProcess Terminated)")
+            loadVideo()
+        }
+
         public func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
             guard message.name == "playerBridge",
                   let body = message.body as? [String: Any],

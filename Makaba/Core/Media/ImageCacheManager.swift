@@ -13,12 +13,13 @@ import CryptoKit
 public final class ImageCacheManager: @unchecked Sendable {
     public static let shared = ImageCacheManager()
 
-    private let memoryCache = NSCache<NSURL, UIImage>()
+    private let memoryCache = NSCache<NSString, UIImage>()
     private let fileManager = FileManager.default
     private let diskCacheURL: URL
     private let ioQueue = DispatchQueue(label: "org.makaba.imagecache.io", qos: .utility)
     private let lock = NSLock()
-    private var inFlightTasks: [URL: Task<UIImage?, Never>] = [:]
+    private var inFlightTasks: [String: Task<UIImage?, Never>] = [:]
+    private var diskWriteCounter: Int = 0
 
     // Disk limit: 200 MB
     private let maxDiskBytes: Int64 = 200 * 1024 * 1024
@@ -30,9 +31,7 @@ public final class ImageCacheManager: @unchecked Sendable {
         let caches = fileManager.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         self.diskCacheURL = caches.appendingPathComponent("MakabaImageCache", isDirectory: true)
 
-        if !fileManager.fileExists(atPath: diskCacheURL.path) {
-            try? fileManager.createDirectory(at: diskCacheURL, withIntermediateDirectories: true)
-        }
+        ensureDiskDirectoryExists()
 
         memoryCache.totalCostLimit = maxMemoryCost
         memoryCache.countLimit = maxMemoryCount
@@ -45,27 +44,48 @@ public final class ImageCacheManager: @unchecked Sendable {
         )
     }
 
+    private func ensureDiskDirectoryExists() {
+        if !fileManager.fileExists(atPath: diskCacheURL.path) {
+            try? fileManager.createDirectory(at: diskCacheURL, withIntermediateDirectories: true)
+        }
+    }
+
     @objc public func clearMemoryCache() {
         lock.lock()
         memoryCache.removeAllObjects()
         lock.unlock()
     }
 
+    /// Resolution-aware cache key formatting.
+    private func cacheKey(for url: URL, targetSize: CGSize? = nil) -> NSString {
+        if let size = targetSize, size.width > 0, size.height > 0 {
+            return "\(url.absoluteString)@\(Int(size.width))x\(Int(size.height))" as NSString
+        }
+        return url.absoluteString as NSString
+    }
+
     /// Synchronous memory cache lookup to prevent view flicker during list scroll.
+    public func memoryImage(for url: URL, targetSize: CGSize? = nil) -> UIImage? {
+        return memoryCache.object(forKey: cacheKey(for: url, targetSize: targetSize))
+    }
+
+    /// Overload for backward compatibility.
     public func memoryImage(for url: URL) -> UIImage? {
-        return memoryCache.object(forKey: url as NSURL)
+        return memoryImage(for: url, targetSize: nil)
     }
 
     /// Asynchronously retrieves, downsamples, and caches an image from memory, disk, or remote network.
     public func image(for url: URL, targetSize: CGSize? = nil) async -> UIImage? {
-        // 1. Check memory cache
-        if let memHit = memoryImage(for: url) {
+        // 1. Check memory cache with resolution-aware key
+        if let memHit = memoryImage(for: url, targetSize: targetSize) {
             return memHit
         }
 
+        let key = cacheKey(for: url, targetSize: targetSize) as String
+
         // 2. In-flight request deduplication
         lock.lock()
-        if let existingTask = inFlightTasks[url] {
+        if let existingTask = inFlightTasks[key] {
             lock.unlock()
             return await existingTask.value
         }
@@ -74,13 +94,13 @@ public final class ImageCacheManager: @unchecked Sendable {
             guard let self = self else { return nil }
             return await self.loadAndProcessImage(for: url, targetSize: targetSize)
         }
-        inFlightTasks[url] = task
+        inFlightTasks[key] = task
         lock.unlock()
 
         let result = await task.value
 
         lock.lock()
-        inFlightTasks.removeValue(forKey: url)
+        inFlightTasks.removeValue(forKey: key)
         lock.unlock()
 
         return result
@@ -95,7 +115,7 @@ public final class ImageCacheManager: @unchecked Sendable {
             // Update last access timestamp for LRU disk pruning
             try? fileManager.setAttributes([.modificationDate: Date()], ofItemAtPath: diskPath.path)
             if let img = decodeAndDownsample(data: diskData, targetSize: targetSize) {
-                storeInMemory(image: img, for: url)
+                storeInMemory(image: img, for: url, targetSize: targetSize)
                 return img
             }
         }
@@ -113,12 +133,17 @@ public final class ImageCacheManager: @unchecked Sendable {
             // Persist raw bytes to disk
             ioQueue.async { [weak self] in
                 guard let self = self else { return }
+                self.ensureDiskDirectoryExists()
                 try? data.write(to: diskPath, options: .atomic)
-                self.pruneDiskCacheIfNeeded()
+                self.diskWriteCounter += 1
+                if self.diskWriteCounter >= 50 {
+                    self.diskWriteCounter = 0
+                    self.pruneDiskCacheIfNeeded()
+                }
             }
 
             if let img = decodeAndDownsample(data: data, targetSize: targetSize) {
-                storeInMemory(image: img, for: url)
+                storeInMemory(image: img, for: url, targetSize: targetSize)
                 return img
             }
         } catch {
@@ -128,9 +153,12 @@ public final class ImageCacheManager: @unchecked Sendable {
         return nil
     }
 
-    private func storeInMemory(image: UIImage, for url: URL) {
-        let cost = Int(image.size.width * image.size.height * 4)
-        memoryCache.setObject(image, forKey: url as NSURL, cost: cost)
+    private func storeInMemory(image: UIImage, for url: URL, targetSize: CGSize? = nil) {
+        let pixelWidth = image.cgImage?.width ?? Int(image.size.width * image.scale)
+        let pixelHeight = image.cgImage?.height ?? Int(image.size.height * image.scale)
+        let bytesPerPixel = (image.cgImage?.bitsPerPixel ?? 32) / 8
+        let cost = pixelWidth * pixelHeight * bytesPerPixel
+        memoryCache.setObject(image, forKey: cacheKey(for: url, targetSize: targetSize), cost: cost)
     }
 
     private func diskFilePath(for url: URL) -> URL {
@@ -149,7 +177,8 @@ public final class ImageCacheManager: @unchecked Sendable {
             return UIImage(data: data)
         }
 
-        let maxDimension = max(targetSize.width, targetSize.height) * UIScreen.main.scale
+        let scale = UIScreen.main.scale
+        let maxDimension = max(targetSize.width, targetSize.height) * scale
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceShouldCacheImmediately: true,
